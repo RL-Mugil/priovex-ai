@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker-compose up *)",
+      "PowerShell(docker compose version *)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(Get-ChildItem \"C:\\\\Program Files\" -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })",
+      "PowerShell(npx --version; node --version)",
+      "mcp__plugin_supabase_supabase__get_project",
+      "mcp__plugin_supabase_supabase__list_projects",
+      "mcp__plugin_supabase_supabase__get_project_url",
+      "mcp__plugin_supabase_supabase__get_publishable_keys",
+      "PowerShell(winget *)",
+      "PowerShell(choco install *)",
+      "PowerShell($env:PATH = $env:PATH + \";C:\\\\Program Files\\\\Docker\\\\Docker\\\\resources\\\\bin;C:\\\\ProgramData\\\\DockerDesktop\\\\version-bin\"; docker --version)"
+    ]
+  }
+}

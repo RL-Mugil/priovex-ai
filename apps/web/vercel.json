@@ -1,0 +1,29 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "cd ../.. && npm run db:generate && npm run build --workspace=apps/web",
+  "installCommand": "npm install",
+  "regions": ["iad1"],
+  "functions": {
+    "src/app/api/searches/[id]/progress/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/searches/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/reports/[id]/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/webhooks/**": {
+      "maxDuration": 10
+    }
+  },
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "https://app.priovex.ai" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET,POST,DELETE,OPTIONS" }
+      ]
+    }
+  ]
+}

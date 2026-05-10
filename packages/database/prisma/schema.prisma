@@ -1,0 +1,448 @@
+// PrioVex.AI — Prisma Schema
+// PostgreSQL with pgvector extension
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DATABASE_DIRECT_URL")
+  extensions = [pgvector(map: "vector", schema: "extensions"), pg_trgm(map: "pg_trgm", schema: "extensions")]
+}
+
+// =============================================================================
+// USERS & ORGANIZATIONS
+// =============================================================================
+
+model User {
+  id                     String   @id @default(cuid())
+  clerkId                String   @unique
+  email                  String   @unique
+  name                   String
+  avatarUrl              String?
+  role                   UserRole @default(USER)
+  stripeCustomerId       String?  @unique
+  subscriptionId         String?  @unique
+  subscriptionTier       PlanTier @default(FREE)
+  subscriptionStatus     SubStatus @default(ACTIVE)
+  subscriptionPeriodEnd  DateTime?
+  searchesUsedThisMonth  Int      @default(0)
+  lastQuotaResetAt       DateTime @default(now())
+  organizationId         String?
+  organization           Organization? @relation(fields: [organizationId], references: [id])
+  searches               Search[]
+  reports                Report[]
+  uploadedFiles          UploadedFile[]
+  auditLogs              AuditLog[]
+  apiKeys                ApiKey[]
+  notifications          Notification[]
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([clerkId])
+  @@index([email])
+  @@index([organizationId])
+  @@map("users")
+}
+
+model Organization {
+  id                    String    @id @default(cuid())
+  clerkOrgId            String?   @unique
+  name                  String
+  slug                  String    @unique
+  logoUrl               String?
+  stripeCustomerId      String?   @unique
+  subscriptionId        String?   @unique
+  subscriptionTier      PlanTier  @default(PRO)
+  subscriptionStatus    SubStatus @default(ACTIVE)
+  subscriptionPeriodEnd DateTime?
+  searchQuotaLimit      Int       @default(50)
+  searchesUsedThisMonth Int       @default(0)
+  lastQuotaResetAt      DateTime  @default(now())
+  members               User[]
+  searches              Search[]
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@map("organizations")
+}
+
+// =============================================================================
+// SEARCHES
+// =============================================================================
+
+model Search {
+  id                String       @id @default(cuid())
+  userId            String
+  user              User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId    String?
+  organization      Organization? @relation(fields: [organizationId], references: [id])
+
+  // Input
+  title             String
+  description       String       @db.Text
+  technicalField    String
+  problemSolved     String       @db.Text
+  keyInnovations    String[]
+  claimsDraft       String?      @db.Text
+  jurisdictions     String[]
+  depth             SearchDepth  @default(STANDARD)
+  aiProvider        AIProviderType @default(CLAUDE)
+  reportStyle       ReportStyle  @default(COMPREHENSIVE)
+
+  // Status
+  status            SearchStatus @default(QUEUED)
+  currentStep       Int          @default(0)
+  totalSteps        Int          @default(7)
+  progressPercent   Int          @default(0)
+  patentsFound      Int          @default(0)
+  patentsAnalyzed   Int          @default(0)
+  errorMessage      String?
+
+  // Timing
+  queuedAt          DateTime     @default(now())
+  startedAt         DateTime?
+  completedAt       DateTime?
+  durationSeconds   Int?
+
+  // Queue
+  bullJobId         String?      @unique
+  retryCount        Int          @default(0)
+  cancelRequested   Boolean      @default(false)
+
+  // Relations
+  report            Report?
+  progressLogs      ProgressLog[]
+  uploadedFiles     SearchFile[]
+  savedPatents      SavedPatent[]
+
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  @@index([userId])
+  @@index([organizationId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("searches")
+}
+
+model ProgressLog {
+  id        String   @id @default(cuid())
+  searchId  String
+  search    Search   @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  level     LogLevel @default(INFO)
+  message   String
+  metadata  Json?
+  timestamp DateTime @default(now())
+
+  @@index([searchId])
+  @@index([timestamp])
+  @@map("progress_logs")
+}
+
+// =============================================================================
+// REPORTS
+// =============================================================================
+
+model Report {
+  id          String @id @default(cuid())
+  searchId    String @unique
+  search      Search @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User   @relation(fields: [userId], references: [id])
+
+  inventionTitle       String
+  reportStyle          ReportStyle
+
+  // Assessment
+  patentabilityScore   Int?
+  noveltyRating        String?
+  obviousnessRating    String?
+  overallVerdict       String?
+  executiveSummary     String?    @db.Text
+  patentabilityData    Json?      // Full PatentabilityAssessment
+  claimStrategyData    Json?      // Full ClaimStrategy
+
+  // Data
+  conceptData          Json?
+  keywordData          Json?
+  topPriorArtData      Json?      // ScoredPatent[]
+  allPatentsData       Json?
+  timelineData         Json?
+  assigneeData         Json?
+  statisticsData       Json?
+  idsReferences        String[]
+
+  // Content
+  markdownContent      String?    @db.Text
+  htmlContent          String?    @db.Text
+
+  // Storage URLs (Supabase)
+  pdfStorageUrl        String?
+  jsonStorageUrl       String?
+  markdownStorageUrl   String?
+
+  // AI metadata
+  aiProvider           AIProviderType
+  aiModel              String
+  aiTokensUsed         Int        @default(0)
+  aiCostUsd            Float      @default(0)
+
+  // BigQuery metadata
+  bqBytesProcessed     BigInt     @default(0)
+  bqCostUsd            Float      @default(0)
+
+  generatedAt          DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+
+  @@index([userId])
+  @@index([searchId])
+  @@map("reports")
+}
+
+// =============================================================================
+// PATENTS & SAVED PATENTS
+// =============================================================================
+
+model PatentCache {
+  id                String    @id @default(cuid())
+  publicationNumber String    @unique
+  title             String?
+  abstract          String?   @db.Text
+  claims            String?   @db.Text
+  filingDate        String?
+  grantDate         String?
+  assignees         String[]
+  inventors         String[]
+  cpcCodes          String[]
+  ipcCodes          String[]
+  countryCode       String?
+  rawData           Json
+  cachedAt          DateTime  @default(now())
+  expiresAt         DateTime
+
+  @@index([publicationNumber])
+  @@index([cachedAt])
+  @@map("patent_cache")
+}
+
+model SavedPatent {
+  id                String   @id @default(cuid())
+  searchId          String
+  search            Search   @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  publicationNumber String
+  title             String
+  relevanceScore    Int
+  similarityScore   Int
+  rank              Int
+  notes             String?
+  createdAt         DateTime @default(now())
+
+  @@unique([searchId, publicationNumber])
+  @@index([searchId])
+  @@map("saved_patents")
+}
+
+// =============================================================================
+// FILES
+// =============================================================================
+
+model UploadedFile {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  filename    String
+  mimeType    String
+  sizeBytes   Int
+  storageKey  String   @unique
+  storageUrl  String
+  scanned     Boolean  @default(false)
+  scanPassed  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  searches    SearchFile[]
+
+  @@index([userId])
+  @@map("uploaded_files")
+}
+
+model SearchFile {
+  searchId String
+  fileId   String
+  search   Search       @relation(fields: [searchId], references: [id], onDelete: Cascade)
+  file     UploadedFile @relation(fields: [fileId], references: [id])
+
+  @@id([searchId, fileId])
+  @@map("search_files")
+}
+
+// =============================================================================
+// BILLING
+// =============================================================================
+
+model StripeEvent {
+  id          String   @id
+  type        String
+  payload     Json
+  processed   Boolean  @default(false)
+  processedAt DateTime?
+  error       String?
+  createdAt   DateTime @default(now())
+
+  @@index([type])
+  @@index([processed])
+  @@map("stripe_events")
+}
+
+// =============================================================================
+// API KEYS
+// =============================================================================
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  keyHash     String    @unique
+  keyPrefix   String
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  usageCount  Int       @default(0)
+  createdAt   DateTime  @default(now())
+
+  @@index([userId])
+  @@index([keyHash])
+  @@map("api_keys")
+}
+
+// =============================================================================
+// AUDIT LOGS
+// =============================================================================
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  resource  String
+  resourceId String?
+  metadata  Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// =============================================================================
+// NOTIFICATIONS
+// =============================================================================
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  message   String
+  readAt    DateTime?
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([readAt])
+  @@map("notifications")
+}
+
+// =============================================================================
+// ADMIN ANALYTICS
+// =============================================================================
+
+model DailyStats {
+  id                   String   @id @default(cuid())
+  date                 DateTime @unique @db.Date
+  newUsers             Int      @default(0)
+  newSearches          Int      @default(0)
+  completedSearches    Int      @default(0)
+  failedSearches       Int      @default(0)
+  totalAiTokens        Int      @default(0)
+  totalAiCostUsd       Float    @default(0)
+  totalBqCostUsd       Float    @default(0)
+  revenueUsd           Float    @default(0)
+  activeSubscriptions  Int      @default(0)
+
+  @@map("daily_stats")
+}
+
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+enum UserRole {
+  USER
+  ADMIN
+  ENTERPRISE
+}
+
+enum PlanTier {
+  FREE
+  PRO
+  AGENCY
+  ENTERPRISE
+}
+
+enum SubStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELLED
+  UNPAID
+}
+
+enum SearchStatus {
+  QUEUED
+  EXTRACTING
+  KEYWORD_STRATEGY
+  BROAD_SEARCH
+  CPC_IDENTIFICATION
+  DEEP_CPC_SEARCH
+  TIMELINE_ANALYSIS
+  AI_ANALYSIS
+  GENERATING_REPORT
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum SearchDepth {
+  QUICK
+  STANDARD
+  THOROUGH
+}
+
+enum AIProviderType {
+  CLAUDE
+  OPENAI
+  GEMINI
+}
+
+enum ReportStyle {
+  LEGAL
+  TECHNICAL
+  INVESTOR
+  CONCISE
+  COMPREHENSIVE
+}
+
+enum LogLevel {
+  INFO
+  WARN
+  ERROR
+  SUCCESS
+}

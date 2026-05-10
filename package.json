@@ -1,0 +1,38 @@
+{
+  "name": "priovex-ai",
+  "version": "1.0.0",
+  "packageManager": "npm@10.5.0",
+  "private": true,
+  "description": "PrioVex.AI — AI-powered Patent Prior-Art Search SaaS Platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "db:generate": "cd packages/database && npx prisma generate",
+    "db:migrate": "cd packages/database && npx prisma migrate deploy",
+    "db:migrate:dev": "cd packages/database && npx prisma migrate dev",
+    "db:studio": "cd packages/database && npx prisma studio",
+    "db:seed": "cd packages/database && npx prisma db seed",
+    "workers:dev": "cd apps/workers && npm run dev",
+    "workers:build": "cd apps/workers && npm run build",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "validate-env": "node scripts/validate-env.js"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3",
+    "@types/node": "^22.7.5"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  }
+}
