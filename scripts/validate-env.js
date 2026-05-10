@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Validates all required environment variables before startup
+require('dotenv').config();
 
 const REQUIRED_VARS = {
   // Database

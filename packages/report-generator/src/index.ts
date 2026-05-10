@@ -1,3 +1,5 @@
 export { generateMarkdownReport } from './markdown';
 export { generateHTMLReport } from './html';
-export { generatePDFReport } from './pdf';
+export { generatePDFReport, generatePDFFromHTML } from './pdf';
+export { generateClientReport } from './client-report';
+export { generateIDSMarkdown, generateIDSCSV } from './ids-report';

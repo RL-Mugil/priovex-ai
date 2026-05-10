@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@priovex/types": "*",
+    "@priovex/ai-providers": "*",
     "puppeteer": "^23.4.0",
     "marked": "^14.1.2",
     "date-fns": "^4.1.0"

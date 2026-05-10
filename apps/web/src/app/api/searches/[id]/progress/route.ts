@@ -5,8 +5,9 @@ import { prisma } from '@priovex/database';
 // Server-Sent Events endpoint for real-time search progress
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
   const { userId: clerkId } = await auth();
   if (!clerkId) {
     return new Response('Unauthorized', { status: 401 });
@@ -16,7 +17,7 @@ export async function GET(
   if (!user) return new Response('Not found', { status: 404 });
 
   const search = await prisma.search.findFirst({
-    where: { id: params.id, userId: user.id },
+    where: { id, userId: user.id },
   });
 
   if (!search) return new Response('Search not found', { status: 404 });
@@ -37,9 +38,9 @@ export async function GET(
 
       // Send initial state
       const initialSearch = await prisma.search.findUnique({
-        where: { id: params.id },
+        where: { id },
         include: {
-          progressLogs: { orderBy: { timestamp: 'desc' }, take: 20 },
+          progressLogs: { orderBy: { timestamp: 'asc' }, take: 100 },
         },
       });
 
@@ -54,9 +55,9 @@ export async function GET(
 
         try {
           const current = await prisma.search.findUnique({
-            where: { id: params.id },
+            where: { id },
             include: {
-              progressLogs: { orderBy: { timestamp: 'desc' }, take: 5 },
+              progressLogs: { orderBy: { timestamp: 'asc' }, take: 100 },
             },
           });
 

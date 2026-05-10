@@ -12,6 +12,7 @@
     "@priovex/ai-providers": "*",
     "@priovex/bigquery": "*",
     "@priovex/database": "*",
+    "@priovex/npl-engine": "*",
     "@priovex/queue": "*",
     "@priovex/report-generator": "*",
     "@priovex/types": "*",

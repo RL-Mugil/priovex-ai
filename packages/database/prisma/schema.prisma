@@ -1,4 +1,4 @@
-// PrioVex.AI — Prisma Schema
+// PrioVex.AI — Prisma Schema v2
 // PostgreSQL with pgvector extension
 
 generator client {
@@ -30,6 +30,7 @@ model User {
   subscriptionStatus     SubStatus @default(ACTIVE)
   subscriptionPeriodEnd  DateTime?
   searchesUsedThisMonth  Int      @default(0)
+  searchQuotaLimit       Int      @default(1)
   lastQuotaResetAt       DateTime @default(now())
   organizationId         String?
   organization           Organization? @relation(fields: [organizationId], references: [id])
@@ -90,16 +91,18 @@ model Search {
   claimsDraft       String?      @db.Text
   jurisdictions     String[]
   depth             SearchDepth  @default(STANDARD)
+  searchType        SearchType   @default(PATENTABILITY)
   aiProvider        AIProviderType @default(CLAUDE)
   reportStyle       ReportStyle  @default(COMPREHENSIVE)
 
   // Status
   status            SearchStatus @default(QUEUED)
   currentStep       Int          @default(0)
-  totalSteps        Int          @default(7)
+  totalSteps        Int          @default(14)
   progressPercent   Int          @default(0)
   patentsFound      Int          @default(0)
   patentsAnalyzed   Int          @default(0)
+  nplFound          Int          @default(0)
   errorMessage      String?
 
   // Timing
@@ -113,6 +116,10 @@ model Search {
   retryCount        Int          @default(0)
   cancelRequested   Boolean      @default(false)
 
+  // Confidential mode
+  confidentialMode  Boolean      @default(false)
+  encryptionKeyId   String?
+
   // Relations
   report            Report?
   progressLogs      ProgressLog[]
@@ -125,6 +132,7 @@ model Search {
   @@index([userId])
   @@index([organizationId])
   @@index([status])
+  @@index([searchType])
   @@index([createdAt])
   @@map("searches")
 }
@@ -144,7 +152,7 @@ model ProgressLog {
 }
 
 // =============================================================================
-// REPORTS
+// REPORTS (v2 — extended)
 // =============================================================================
 
 model Report {
@@ -156,6 +164,7 @@ model Report {
 
   inventionTitle       String
   reportStyle          ReportStyle
+  searchType           SearchType @default(PATENTABILITY)
 
   // Assessment
   patentabilityScore   Int?
@@ -163,27 +172,42 @@ model Report {
   obviousnessRating    String?
   overallVerdict       String?
   executiveSummary     String?    @db.Text
-  patentabilityData    Json?      // Full PatentabilityAssessment
-  claimStrategyData    Json?      // Full ClaimStrategy
+  patentabilityData    Json?
+  claimStrategyData    Json?
+
+  // v2 — Core intelligence layers
+  novelElementsData    Json?      // NovelElement[] — claim-like decomposition
+  coverageMatrixData   Json?      // CoverageMatrix — element × reference grid
+  idsEntriesData       Json?      // IDSEntry[] — USPTO-ready IDS table
+  examinerSimulationData Json?    // ExaminerPrediction
+  gapClaimDraftData    Json?      // GapGroundedClaimDraft
+
+  // v2 — NPL intelligence
+  nplReferencesData    Json?      // NPLReference[]
+  nplStatisticsData    Json?      // NPL search stats
 
   // Data
   conceptData          Json?
   keywordData          Json?
-  topPriorArtData      Json?      // ScoredPatent[]
+  topPriorArtData      Json?
   allPatentsData       Json?
   timelineData         Json?
   assigneeData         Json?
   statisticsData       Json?
   idsReferences        String[]
 
-  // Content
-  markdownContent      String?    @db.Text
-  htmlContent          String?    @db.Text
+  // v2 — Dual report content
+  markdownContent      String?    @db.Text   // Internal technical report
+  htmlContent          String?    @db.Text   // Internal HTML report
+  clientReportContent  String?    @db.Text   // Clean client-facing supplementary report
+  clientReportHtml     String?    @db.Text   // Client report in HTML
 
   // Storage URLs (Supabase)
   pdfStorageUrl        String?
+  clientPdfStorageUrl  String?
   jsonStorageUrl       String?
   markdownStorageUrl   String?
+  clientReportStorageUrl String?
 
   // AI metadata
   aiProvider           AIProviderType
@@ -194,6 +218,9 @@ model Report {
   // BigQuery metadata
   bqBytesProcessed     BigInt     @default(0)
   bqCostUsd            Float      @default(0)
+
+  // Disclaimer applied
+  disclaimerVersion    String?    @default("v1")
 
   generatedAt          DateTime   @default(now())
   updatedAt            DateTime   @updatedAt
@@ -213,6 +240,8 @@ model PatentCache {
   title             String?
   abstract          String?   @db.Text
   claims            String?   @db.Text
+  fullClaims        Json?     // Structured claims from PatentsView
+  description       String?   @db.Text
   filingDate        String?
   grantDate         String?
   assignees         String[]
@@ -221,6 +250,7 @@ model PatentCache {
   ipcCodes          String[]
   countryCode       String?
   rawData           Json
+  claimsSource      String?   // "patentsview" | "bigquery" | "uspto"
   cachedAt          DateTime  @default(now())
   expiresAt         DateTime
 
@@ -244,6 +274,32 @@ model SavedPatent {
   @@unique([searchId, publicationNumber])
   @@index([searchId])
   @@map("saved_patents")
+}
+
+// =============================================================================
+// NPL REFERENCE CACHE
+// =============================================================================
+
+model NplCache {
+  id              String   @id @default(cuid())
+  sourceId        String   @unique  // arxiv:2301.XXXXX | ss:paper_id | doi:10.xxx
+  source          String            // "arxiv" | "semantic_scholar" | "ieee" | "uspto_efts"
+  title           String
+  authors         String[]
+  abstract        String?  @db.Text
+  publicationDate String?
+  url             String?
+  doi             String?
+  categories      String[]
+  citationCount   Int?
+  rawData         Json
+  cachedAt        DateTime @default(now())
+  expiresAt       DateTime
+
+  @@index([sourceId])
+  @@index([source])
+  @@index([cachedAt])
+  @@map("npl_cache")
 }
 
 // =============================================================================
@@ -361,6 +417,18 @@ model Notification {
 }
 
 // =============================================================================
+// SYSTEM CONFIG (admin-managed key-value store)
+// =============================================================================
+
+model SystemConfig {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("system_configs")
+}
+
+// =============================================================================
 // ADMIN ANALYTICS
 // =============================================================================
 
@@ -376,6 +444,7 @@ model DailyStats {
   totalBqCostUsd       Float    @default(0)
   revenueUsd           Float    @default(0)
   activeSubscriptions  Int      @default(0)
+  totalNplSearches     Int      @default(0)
 
   @@map("daily_stats")
 }
@@ -405,15 +474,29 @@ enum SubStatus {
   UNPAID
 }
 
+enum SearchType {
+  PATENTABILITY
+  INVALIDITY
+  FTO
+  NOVELTY
+  EXAMINER_STYLE
+}
+
 enum SearchStatus {
   QUEUED
   EXTRACTING
+  NOVEL_ELEMENTS
   KEYWORD_STRATEGY
   BROAD_SEARCH
   CPC_IDENTIFICATION
   DEEP_CPC_SEARCH
+  NPL_SEARCH
+  CLAIMS_RETRIEVAL
   TIMELINE_ANALYSIS
-  AI_ANALYSIS
+  AI_SCORING
+  COVERAGE_ANALYSIS
+  IDS_GENERATION
+  EXAMINER_SIMULATION
   GENERATING_REPORT
   COMPLETED
   FAILED

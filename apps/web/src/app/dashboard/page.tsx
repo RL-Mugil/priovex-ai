@@ -28,7 +28,15 @@ async function getDashboardData(clerkId: string) {
     prisma.search.count({
       where: {
         userId: user.id,
-        status: { in: ['QUEUED', 'EXTRACTING', 'BROAD_SEARCH', 'AI_ANALYSIS', 'GENERATING_REPORT'] },
+        status: {
+          in: [
+            'QUEUED', 'EXTRACTING', 'NOVEL_ELEMENTS', 'KEYWORD_STRATEGY',
+            'BROAD_SEARCH', 'CPC_IDENTIFICATION', 'DEEP_CPC_SEARCH',
+            'NPL_SEARCH', 'CLAIMS_RETRIEVAL', 'TIMELINE_ANALYSIS',
+            'AI_SCORING', 'COVERAGE_ANALYSIS', 'IDS_GENERATION',
+            'EXAMINER_SIMULATION', 'GENERATING_REPORT',
+          ] as any,
+        },
       },
     }),
   ]);

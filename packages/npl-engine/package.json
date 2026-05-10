@@ -1,0 +1,18 @@
+{
+  "name": "@priovex/npl-engine",
+  "version": "1.0.0",
+  "description": "NPL intelligence engine — arXiv, Semantic Scholar, USPTO EFTS, PatentsView claims",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@priovex/types": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/node": "^22.7.5"
+  }
+}

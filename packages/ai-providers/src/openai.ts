@@ -8,6 +8,16 @@ import type {
   ConceptExtraction,
   KeywordStrategy,
   ScoredPatent,
+  NovelElementDecompositionInput,
+  NovelElementDecompositionOutput,
+  CoverageAnalysisInput,
+  CoverageAnalysisOutput,
+  ExaminerSimulationInput,
+  GapClaimDraftInput,
+  IDSAnalysisInput,
+  ExaminerPrediction,
+  GapGroundedClaimDraft,
+  IDSEntry,
 } from '@priovex/types';
 import type { AIProvider } from './interface';
 import { withRetry } from './interface';
@@ -17,6 +27,12 @@ import {
   buildKeywordStrategyPrompt,
   buildPatentComparisonPrompt,
   buildFullReportPrompt,
+  buildNovelElementDecompositionPrompt,
+  buildCoverageAnalysisPrompt,
+  buildNPLAnalysisPrompt,
+  buildExaminerSimulationPrompt,
+  buildGapGroundedClaimDraftingPrompt,
+  buildIDSAnalysisPrompt,
 } from './prompts';
 
 const OPENAI_MODEL = 'gpt-4o';
@@ -24,6 +40,7 @@ const OPENAI_MODEL = 'gpt-4o';
 export class OpenAIProvider implements AIProvider {
   readonly name = 'OpenAI GPT-4o';
   readonly model = OPENAI_MODEL;
+  readonly providerType = 'openai' as const;
 
   private client: OpenAI;
 
@@ -179,5 +196,74 @@ export class OpenAIProvider implements AIProvider {
       model: OPENAI_MODEL,
       provider: 'openai',
     };
+  }
+
+  async decomposeNovelElements(input: NovelElementDecompositionInput): Promise<NovelElementDecompositionOutput> {
+    const prompt = buildNovelElementDecompositionPrompt(
+      input.inventionTitle, input.inventionDescription, input.technicalField,
+      input.problemSolved, input.keyInnovations, input.claimsDraft
+    );
+    const { text } = await this.chat(prompt);
+    return this.parseJSON<NovelElementDecompositionOutput>(text);
+  }
+
+  async analyzeCoverageForReference(input: CoverageAnalysisInput): Promise<CoverageAnalysisOutput> {
+    const elements = input.novelElements.map((e) => ({ id: e.id, label: e.label, claimLanguage: e.claimLanguage }));
+    const prompt = buildCoverageAnalysisPrompt(input.inventionDescription, elements, input.reference);
+    const { text } = await this.chat(prompt);
+    return this.parseJSON<CoverageAnalysisOutput>(text);
+  }
+
+  async analyzeNPLReference(
+    inventionDescription: string, nplTitle: string, nplAbstract: string, nplSource: string
+  ): Promise<{
+    similarityScore: number; similarities: string[]; differences: string[];
+    noveltyImpact: 'blocking' | 'strong' | 'moderate' | 'weak' | 'minimal';
+    analysis: string; anticipationRisk: number; obviousnessRisk: number;
+    isSuitable103Combination: boolean; disclosureNote: string;
+  }> {
+    const prompt = buildNPLAnalysisPrompt(inventionDescription, nplTitle, nplAbstract, nplSource);
+    const { text } = await this.chat(prompt);
+    return this.parseJSON(text);
+  }
+
+  async simulateExaminer(input: ExaminerSimulationInput): Promise<ExaminerPrediction> {
+    const prompt = buildExaminerSimulationPrompt(
+      input.inventionTitle, input.inventionDescription, input.technicalField,
+      input.novelElements.map((e) => ({ id: e.id, claimLanguage: e.claimLanguage })),
+      input.topPatents.slice(0, 8).map((p) => p.publicationNumber),
+      input.topPatents.slice(0, 8).map((p) => p.title),
+      input.cpcCodes
+    );
+    const { text } = await this.chat(prompt);
+    return this.parseJSON<ExaminerPrediction>(text);
+  }
+
+  async generateGapGroundedClaims(input: GapClaimDraftInput): Promise<GapGroundedClaimDraft> {
+    const topPatentsStr = input.topPatents.slice(0, 10).map((p, i) =>
+      `${i + 1}. ${p.publicationNumber} — "${p.title}" (impact: ${p.noveltyImpact})`
+    ).join('\n');
+    const prompt = buildGapGroundedClaimDraftingPrompt(
+      input.inventionTitle, input.inventionDescription, input.technicalField,
+      input.novelElements, 'Coverage analysis unavailable', topPatentsStr
+    );
+    const { text } = await this.chat(prompt);
+    return this.parseJSON<GapGroundedClaimDraft>(text);
+  }
+
+  async generateIDSAnalysis(input: IDSAnalysisInput): Promise<IDSEntry[]> {
+    const refs = [
+      ...input.patents.slice(0, 15).map((p) => ({
+        id: p.publicationNumber, type: 'patent' as const,
+        number: p.publicationNumber, title: p.title, abstract: p.abstract,
+      })),
+      ...input.nplReferences.slice(0, 10).map((n) => ({
+        id: n.id, type: 'npl' as const, title: n.title, abstract: n.abstract,
+      })),
+    ];
+    if (refs.length === 0) return [];
+    const prompt = buildIDSAnalysisPrompt(input.inventionDescription, refs);
+    const { text } = await this.chat(prompt);
+    return this.parseJSON<IDSEntry[]>(text);
   }
 }

@@ -23,7 +23,7 @@ const navItems = [
   { href: '/dashboard/settings', icon: Settings, label: 'Settings' },
 ];
 
-export function DashboardSidebar() {
+export function DashboardSidebar({ isAdmin = false }: { isAdmin?: boolean }) {
   const pathname = usePathname();
 
   return (
@@ -68,25 +68,27 @@ export function DashboardSidebar() {
           );
         })}
 
-        {/* Admin link — shown based on server role */}
-        <Link
-          href="/dashboard/admin"
-          className={cn(
-            'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
-            pathname.startsWith('/dashboard/admin')
-              ? 'bg-blue-50 text-blue-700'
-              : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-          )}
-        >
-          <Shield className="w-4 h-4 text-slate-400" />
-          Admin
-        </Link>
+        {/* Admin link — shown only if isAdmin */}
+        {isAdmin && (
+          <Link
+            href="/dashboard/admin"
+            className={cn(
+              'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
+              pathname.startsWith('/dashboard/admin')
+                ? 'bg-blue-50 text-blue-700'
+                : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+            )}
+          >
+            <Shield className="w-4 h-4 text-slate-400" />
+            Admin
+          </Link>
+        )}
       </nav>
 
       {/* User */}
       <div className="p-4 border-t border-slate-200">
         <div className="flex items-center gap-3">
-          <UserButton afterSignOutUrl="/" />
+          <UserButton />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-slate-900 truncate">Account</p>
           </div>

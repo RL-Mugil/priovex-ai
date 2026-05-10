@@ -6,7 +6,7 @@ export interface KeywordQueryOptions {
   jurisdictions: Jurisdiction[];
   limit: number;
   offset?: number;
-  dateFrom?: string;
+  dateFrom?: string; // YYYYMMDD — defaults to 20000101 to reduce BigQuery bytes scanned
 }
 
 export interface CPCQueryOptions {
@@ -40,18 +40,33 @@ function buildCountryFilter(jurisdictions: Jurisdiction[]): string {
   return `AND country_code IN (${codes})`;
 }
 
-export function buildKeywordSearchQuery(opts: KeywordQueryOptions): string {
-  const { keywords, jurisdictions, limit, offset = 0 } = opts;
+export function buildKeywordSearchQuery(opts: KeywordQueryOptions & { includeClaims?: boolean }): string {
+  const { keywords, jurisdictions, limit, offset = 0, includeClaims = false, dateFrom = '20000101' } = opts;
 
-  const conditions = keywords
-    .filter((kw) => kw.trim())
-    .slice(0, 5) // Max 5 keyword conditions per query
+  const validKeywords = keywords
+    .map(kw => kw.trim())
+    .filter(kw => kw.length > 0)
+    .slice(0, 8); // Allow slightly more keywords
+
+  if (validKeywords.length === 0) {
+    // If no keywords, return a query that matches nothing or just filters by country
+    // BigQuery doesn't like empty WHERE, so we use a constant false condition
+    return `SELECT * FROM \`${PATENTS_TABLE}\` WHERE 1=0 LIMIT 0`;
+  }
+
+  const conditions = validKeywords
     .map((kw) => {
       const safe = sanitizeKeyword(kw);
-      return `(
+      let condition = `(
         LOWER(title_localized[SAFE_OFFSET(0)].text) LIKE '%${safe}%'
-        OR LOWER(abstract_localized[SAFE_OFFSET(0)].text) LIKE '%${safe}%'
-      )`;
+        OR LOWER(abstract_localized[SAFE_OFFSET(0)].text) LIKE '%${safe}%'`;
+      
+      if (includeClaims) {
+        condition += `\n        OR LOWER(claims_localized[SAFE_OFFSET(0)].text) LIKE '%${safe}%'`;
+      }
+      
+      condition += `\n      )`;
+      return condition;
     })
     .join('\n      OR ');
 
@@ -78,14 +93,16 @@ export function buildKeywordSearchQuery(opts: KeywordQueryOptions): string {
     ${countryFilter}
     AND title_localized[SAFE_OFFSET(0)].text IS NOT NULL
     AND abstract_localized[SAFE_OFFSET(0)].text IS NOT NULL
+    AND filing_date IS NOT NULL
+    AND CAST(filing_date AS INT64) >= ${dateFrom}
     ORDER BY filing_date DESC
     LIMIT ${Math.min(limit, 200)}
     OFFSET ${offset}
   `;
 }
 
-export function buildCPCSearchQuery(opts: CPCQueryOptions): string {
-  const { cpcCodes, jurisdictions, limit, offset = 0 } = opts;
+export function buildCPCSearchQuery(opts: CPCQueryOptions & { dateFrom?: string }): string {
+  const { cpcCodes, jurisdictions, limit, offset = 0, dateFrom = '20000101' } = opts;
 
   const cpcConditions = cpcCodes
     .slice(0, 10)
@@ -107,8 +124,7 @@ export function buildCPCSearchQuery(opts: CPCQueryOptions): string {
       ARRAY(SELECT code FROM UNNEST(cpc) LIMIT 10) AS cpc_codes,
       ARRAY(SELECT code FROM UNNEST(ipc) LIMIT 5) AS ipc_codes,
       country_code,
-      family_id,
-      citation_count
+      family_id
     FROM \`${PATENTS_TABLE}\`
     WHERE EXISTS (
       SELECT 1 FROM UNNEST(cpc) AS cpc_entry
@@ -116,7 +132,9 @@ export function buildCPCSearchQuery(opts: CPCQueryOptions): string {
     )
     ${countryFilter}
     AND title_localized[SAFE_OFFSET(0)].text IS NOT NULL
-    ORDER BY citation_count DESC, filing_date DESC
+    AND filing_date IS NOT NULL
+    AND CAST(filing_date AS INT64) >= ${dateFrom}
+    ORDER BY filing_date DESC
     LIMIT ${Math.min(limit, 200)}
     OFFSET ${offset}
   `;
@@ -141,7 +159,9 @@ export function buildCPCExtractionQuery(patentNumbers: string[]): string {
 export function buildTimelineQuery(opts: TimelineQueryOptions): string {
   const { keywords, cpcCodes, jurisdictions, yearFrom = 2000 } = opts;
 
-  const conditions = keywords
+  const keywordConditions = keywords
+    .map(kw => kw.trim())
+    .filter(kw => kw.length > 0)
     .slice(0, 3)
     .map((kw) => {
       const safe = sanitizeKeyword(kw);
@@ -150,8 +170,20 @@ export function buildTimelineQuery(opts: TimelineQueryOptions): string {
     .join(' OR ');
 
   const cpcConditions = cpcCodes.length
-    ? `OR EXISTS (SELECT 1 FROM UNNEST(cpc) AS c WHERE c.code IN (${cpcCodes.map((c) => `'${c}'`).join(', ')}))`
+    ? `EXISTS (SELECT 1 FROM UNNEST(cpc) AS c WHERE c.code IN (${cpcCodes.map((c) => `'${c}'`).join(', ')}))`
     : '';
+
+  let finalCondition = '';
+  if (keywordConditions && cpcConditions) {
+    finalCondition = `(${keywordConditions} OR ${cpcConditions})`;
+  } else if (keywordConditions) {
+    finalCondition = `(${keywordConditions})`;
+  } else if (cpcConditions) {
+    finalCondition = `(${cpcConditions})`;
+  } else {
+    // If no keywords or CPCs, return empty query
+    return `SELECT 0 as year, 0 as filing_count, [] as top_assignees LIMIT 0`;
+  }
 
   const countryFilter = buildCountryFilter(jurisdictions);
 
@@ -161,7 +193,7 @@ export function buildTimelineQuery(opts: TimelineQueryOptions): string {
       COUNT(*) AS filing_count,
       ARRAY_AGG(DISTINCT assignee_harmonized[SAFE_OFFSET(0)].name IGNORE NULLS LIMIT 5) AS top_assignees
     FROM \`${PATENTS_TABLE}\`
-    WHERE (${conditions} ${cpcConditions})
+    WHERE ${finalCondition}
     ${countryFilter}
     AND filing_date IS NOT NULL
     AND CAST(filing_date AS INT64) >= ${yearFrom}0101
@@ -175,13 +207,19 @@ export function buildAssigneeAnalysisQuery(
   cpcCodes: string[],
   jurisdictions: Jurisdiction[]
 ): string {
-  const conditions = keywords
+  const keywordConditions = keywords
+    .map(kw => kw.trim())
+    .filter(kw => kw.length > 0)
     .slice(0, 3)
     .map((kw) => {
       const safe = sanitizeKeyword(kw);
       return `LOWER(abstract_localized[SAFE_OFFSET(0)].text) LIKE '%${safe}%'`;
     })
     .join(' OR ');
+
+  if (!keywordConditions) {
+    return `SELECT '' as assignee_name, 0 as patent_count, 0 as latest_filing, 0 as earliest_filing LIMIT 0`;
+  }
 
   const countryFilter = buildCountryFilter(jurisdictions);
 
@@ -192,7 +230,7 @@ export function buildAssigneeAnalysisQuery(
       MAX(CAST(filing_date AS INT64)) AS latest_filing,
       MIN(CAST(filing_date AS INT64)) AS earliest_filing
     FROM \`${PATENTS_TABLE}\`
-    WHERE (${conditions})
+    WHERE (${keywordConditions})
     ${countryFilter}
     AND assignee_harmonized[SAFE_OFFSET(0)].name IS NOT NULL
     GROUP BY assignee_name

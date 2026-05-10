@@ -15,8 +15,9 @@ export function createSearchWorker(): Worker<SearchJobData, SearchJobResult> {
     {
       connection: getRedisConnection(),
       concurrency,
-      maxStalledCount: 1,
-      stalledInterval: 60000,
+      lockDuration: 300000,    // 5-minute lock — renewed every 2.5 min automatically
+      maxStalledCount: 0,      // stalled job goes straight to FAILED — prevents double run
+      stalledInterval: 30000,  // check for stalls every 30s
     }
   );
 

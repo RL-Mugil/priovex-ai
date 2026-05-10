@@ -6,9 +6,9 @@ import { enqueueSearch } from '@priovex/queue';
 
 const CreateSearchSchema = z.object({
   title: z.string().min(5).max(200),
-  description: z.string().min(20).max(5000),
-  technicalField: z.string().min(3).max(200),
-  problemSolved: z.string().min(10).max(2000),
+  description: z.string().min(10).max(5000),
+  technicalField: z.string().min(2).max(200),
+  problemSolved: z.string().min(5).max(2000),
   keyInnovations: z.array(z.string()).min(1).max(10),
   claimsDraft: z.string().max(5000).optional(),
   jurisdictions: z.array(z.enum(['US', 'EP', 'WO', 'CN', 'JP', 'KR', 'GB', 'DE', 'FR'])).default(['US']),

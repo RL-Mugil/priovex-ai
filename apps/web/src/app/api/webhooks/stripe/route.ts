@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { prisma } from '@priovex/database';
-import { PlanTier, SubStatus } from '@priovex/database';
+import { prisma, PlanTier, SubStatus, type Prisma } from '@priovex/database';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2024-09-30.acacia' });
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2024-06-20' });
 
 const QUOTA_BY_TIER: Record<string, number> = {
   free: 1,
@@ -35,7 +34,7 @@ export async function POST(req: NextRequest) {
   await prisma.stripeEvent.upsert({
     where: { id: event.id },
     update: {},
-    create: { id: event.id, type: event.type, payload: event as any },
+    create: { id: event.id, type: event.type, payload: event as unknown as Prisma.InputJsonValue },
   });
 
   try {

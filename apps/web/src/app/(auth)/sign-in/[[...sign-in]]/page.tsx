@@ -11,6 +11,8 @@ export default function SignInPage() {
             headerTitle: 'text-2xl font-bold',
           },
         }}
+        fallbackRedirectUrl="/dashboard"
+        forceRedirectUrl="/dashboard"
       />
     </div>
   );

@@ -12,7 +12,9 @@
       "mcp__plugin_supabase_supabase__get_publishable_keys",
       "PowerShell(winget *)",
       "PowerShell(choco install *)",
-      "PowerShell($env:PATH = $env:PATH + \";C:\\\\Program Files\\\\Docker\\\\Docker\\\\resources\\\\bin;C:\\\\ProgramData\\\\DockerDesktop\\\\version-bin\"; docker --version)"
+      "PowerShell($env:PATH = $env:PATH + \";C:\\\\Program Files\\\\Docker\\\\Docker\\\\resources\\\\bin;C:\\\\ProgramData\\\\DockerDesktop\\\\version-bin\"; docker --version)",
+      "PowerShell(Get-Process *)",
+      "Bash(node -e ' *)"
     ]
   }
 }

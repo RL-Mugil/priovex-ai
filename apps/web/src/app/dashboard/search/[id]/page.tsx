@@ -7,10 +7,11 @@ import { SearchResults } from '@/components/search/search-results';
 export const dynamic = 'force-dynamic';
 
 interface Props {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
-export default async function SearchDetailPage({ params }: Props) {
+export default async function SearchDetailPage(props: Props) {
+  const params = await props.params;
   const { userId } = await auth();
   if (!userId) redirect('/sign-in');
 
@@ -27,6 +28,7 @@ export default async function SearchDetailPage({ params }: Props) {
           overallVerdict: true,
           noveltyRating: true,
           obviousnessRating: true,
+          executiveSummary: true,
           pdfStorageUrl: true,
           markdownStorageUrl: true,
           generatedAt: true,
@@ -41,11 +43,14 @@ export default async function SearchDetailPage({ params }: Props) {
 
   if (!search) notFound();
 
-  const isActive = [
-    'QUEUED', 'EXTRACTING', 'KEYWORD_STRATEGY', 'BROAD_SEARCH',
-    'CPC_IDENTIFICATION', 'DEEP_CPC_SEARCH', 'TIMELINE_ANALYSIS',
-    'AI_ANALYSIS', 'GENERATING_REPORT',
-  ].includes(search.status);
+  const ACTIVE_STATUSES = [
+    'QUEUED', 'EXTRACTING', 'NOVEL_ELEMENTS', 'KEYWORD_STRATEGY',
+    'BROAD_SEARCH', 'CPC_IDENTIFICATION', 'DEEP_CPC_SEARCH',
+    'NPL_SEARCH', 'CLAIMS_RETRIEVAL', 'TIMELINE_ANALYSIS',
+    'AI_SCORING', 'COVERAGE_ANALYSIS', 'IDS_GENERATION',
+    'EXAMINER_SIMULATION', 'GENERATING_REPORT',
+  ];
+  const isActive = ACTIVE_STATUSES.includes(search.status);
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">

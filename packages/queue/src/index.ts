@@ -37,23 +37,21 @@ export function getConnectionOptions(): ConnectionOptions {
   };
 }
 
-// ─── QUEUES ──────────────────────────────────────────────────────────────────
+// --- QUEUES ------------------------------------------------------------------
 
-export function createSearchQueue(): Queue<SearchJobData, SearchJobResult> {
-  return new Queue<SearchJobData, SearchJobResult>(QUEUE_NAMES.SEARCH, {
+export function createSearchQueue(): Queue<SearchJobData, SearchJobResult, string> {
+  return new Queue<SearchJobData, SearchJobResult, string>(QUEUE_NAMES.SEARCH, {
     connection: getRedisConnection(),
     defaultJobOptions: {
-      attempts: 2,
-      backoff: { type: 'exponential', delay: 5000 },
+      attempts: 1,          // no auto-retry — stalled/failed stays failed; user resubmits
       removeOnComplete: { age: 86400, count: 100 },
       removeOnFail: { age: 604800, count: 500 },
-      timeout: parseInt(process.env.SEARCH_TIMEOUT_MS ?? '2700000'),
     },
   });
 }
 
-export function createReportQueue(): Queue<ReportJobData> {
-  return new Queue<ReportJobData>(QUEUE_NAMES.REPORT, {
+export function createReportQueue(): Queue<ReportJobData, void, string> {
+  return new Queue<ReportJobData, void, string>(QUEUE_NAMES.REPORT, {
     connection: getRedisConnection(),
     defaultJobOptions: {
       attempts: 3,
@@ -69,7 +67,7 @@ export function createSearchQueueEvents(): QueueEvents {
   });
 }
 
-// ─── JOB HELPERS ─────────────────────────────────────────────────────────────
+// --- JOB HELPERS -------------------------------------------------------------
 
 export async function enqueueSearch(
   data: SearchJobData

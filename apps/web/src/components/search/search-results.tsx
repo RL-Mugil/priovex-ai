@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { Download, FileText, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Download, FileText, ExternalLink, RefreshCw, Trash2, AlertTriangle } from 'lucide-react';
 import { useState } from 'react';
 import { cn, getVerdictColor } from '@/lib/utils';
 
@@ -11,6 +12,7 @@ interface Report {
   overallVerdict: string | null;
   noveltyRating: string | null;
   obviousnessRating: string | null;
+  executiveSummary: string | null;
   pdfStorageUrl: string | null;
   markdownStorageUrl: string | null;
   generatedAt: string;
@@ -20,16 +22,110 @@ interface Search {
   id: string;
   title: string;
   description: string;
+  status: string;
   aiProvider: string;
   depth: string;
   patentsFound: number;
   patentsAnalyzed: number;
   durationSeconds: number | null;
+  errorMessage?: string | null;
   report: Report | null;
 }
 
 export function SearchResults({ search }: { search: Search }) {
+  const router = useRouter();
+  const [retrying, setRetrying] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const report = search.report;
+
+  async function handleRetry() {
+    setRetrying(true);
+    try {
+      const res = await fetch(`/api/searches/${search.id}/retry`, { method: 'POST' });
+      if (res.ok) {
+        const { searchId } = await res.json() as { searchId: string };
+        router.push(`/dashboard/search/${searchId}`);
+      }
+    } finally { setRetrying(false); }
+  }
+
+  async function handleDelete() {
+    if (!confirm('Delete this search and its report permanently?')) return;
+    setDeleting(true);
+    try {
+      await fetch(`/api/searches/${search.id}`, { method: 'DELETE' });
+      router.push('/dashboard/searches');
+    } finally { setDeleting(false); }
+  }
+
+  if (search.status === 'FAILED' || search.status === 'CANCELLED') {
+    const isCancelled = search.status === 'CANCELLED';
+    return (
+      <div className="space-y-4">
+        <div className={cn(
+          'rounded-2xl border p-6 text-center',
+          isCancelled ? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200'
+        )}>
+          <AlertTriangle className={cn('w-10 h-10 mx-auto mb-3', isCancelled ? 'text-amber-400' : 'text-red-400')} />
+          <h3 className={cn('font-semibold mb-1', isCancelled ? 'text-amber-800' : 'text-red-800')}>
+            {isCancelled ? 'Search Cancelled' : 'Search Failed'}
+          </h3>
+          {isCancelled && report && (
+            <p className="text-sm text-amber-700 mb-1">
+              A partial report was saved with {search.patentsFound} patents found before cancellation.
+            </p>
+          )}
+          {isCancelled && report?.executiveSummary && (
+            <p className="text-xs text-amber-600 mt-1 max-w-md mx-auto">{report.executiveSummary}</p>
+          )}
+          {search.errorMessage && !isCancelled && (
+            <p className="text-sm text-red-600 mb-4 max-w-lg mx-auto">{search.errorMessage}</p>
+          )}
+          <div className="flex flex-wrap justify-center gap-3 mt-4">
+            {isCancelled && report && (
+              <>
+                <a
+                  href={`/api/reports/${report.id}?format=pdf`}
+                  download
+                  className="flex items-center gap-2 bg-amber-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-amber-500"
+                >
+                  <Download className="w-4 h-4" />
+                  Download PDF
+                </a>
+                <a
+                  href={`/api/reports/${report.id}?format=markdown`}
+                  download={`partial-report-${search.id}.md`}
+                  className="flex items-center gap-2 bg-white border border-amber-300 text-amber-700 px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-amber-50"
+                >
+                  <FileText className="w-4 h-4" />
+                  Download Markdown
+                </a>
+              </>
+            )}
+            <button
+              onClick={handleRetry}
+              disabled={retrying}
+              className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-500 disabled:opacity-60"
+            >
+              <RefreshCw className={cn('w-4 h-4', retrying && 'animate-spin')} />
+              {retrying ? 'Starting…' : 'Retry Search'}
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className={cn(
+                'flex items-center gap-2 border px-5 py-2.5 rounded-lg text-sm font-medium disabled:opacity-60',
+                isCancelled ? 'border-amber-300 text-amber-700 hover:bg-amber-50' : 'border-red-300 text-red-600 hover:bg-red-50'
+              )}
+            >
+              <Trash2 className="w-4 h-4" />
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!report) {
     return (
@@ -89,17 +185,14 @@ export function SearchResults({ search }: { search: Search }) {
       <div className="bg-white rounded-2xl border border-slate-200 p-6">
         <h3 className="font-semibold text-slate-900 mb-4">Download Report</h3>
         <div className="grid grid-cols-3 gap-3">
-          {report.pdfStorageUrl && (
-            <a
-              href={`/api/reports/${report.id}?format=pdf`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm font-medium transition-colors"
-            >
-              <Download className="w-4 h-4" />
-              PDF Report
-            </a>
-          )}
+          <a
+            href={`/api/reports/${report.id}?format=pdf`}
+            download
+            className="flex items-center gap-2 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm font-medium transition-colors"
+          >
+            <Download className="w-4 h-4" />
+            PDF Report
+          </a>
           <a
             href={`/api/reports/${report.id}?format=markdown`}
             className="flex items-center gap-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 rounded-lg px-4 py-3 text-sm font-medium transition-colors"
@@ -119,13 +212,23 @@ export function SearchResults({ search }: { search: Search }) {
         </div>
       </div>
 
-      {/* Full report link */}
-      <Link
-        href={`/dashboard/reports/${report.id}`}
-        className="block bg-blue-600 hover:bg-blue-500 text-white text-center py-4 rounded-xl font-semibold transition-colors"
-      >
-        View Full Report →
-      </Link>
+      {/* Actions */}
+      <div className="flex gap-3">
+        <Link
+          href={`/dashboard/reports/${report.id}`}
+          className="flex-1 block bg-blue-600 hover:bg-blue-500 text-white text-center py-3.5 rounded-xl font-semibold transition-colors"
+        >
+          View Full Report →
+        </Link>
+        <button
+          onClick={handleDelete}
+          disabled={deleting}
+          className="flex items-center gap-2 border border-slate-200 text-slate-500 px-4 py-3 rounded-xl hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors text-sm disabled:opacity-50"
+        >
+          <Trash2 className="w-4 h-4" />
+          {deleting ? 'Deleting…' : 'Delete'}
+        </button>
+      </div>
     </div>
   );
 }

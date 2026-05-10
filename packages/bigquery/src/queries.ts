@@ -14,6 +14,12 @@ export interface QueryResult {
   totalRows: number;
 }
 
+interface BigQueryMetadata {
+  statistics?: {
+    totalBytesProcessed?: string | number;
+  };
+}
+
 async function runQuery<T>(sql: string): Promise<{ rows: T[]; bytesProcessed: bigint }> {
   const bq = getBigQueryClient();
 
@@ -24,7 +30,7 @@ async function runQuery<T>(sql: string): Promise<{ rows: T[]; bytesProcessed: bi
   });
 
   const [rows, , metadata] = await job.getQueryResults({ autoPaginate: true });
-  const bytesProcessed = BigInt(metadata?.statistics?.totalBytesProcessed ?? '0');
+  const bytesProcessed = BigInt((metadata as BigQueryMetadata)?.statistics?.totalBytesProcessed ?? '0');
 
   return { rows: rows as T[], bytesProcessed };
 }
@@ -59,9 +65,10 @@ function mapRowToPatent(row: Record<string, unknown>): RawPatent {
 export async function searchByKeywords(
   keywords: string[],
   jurisdictions: Jurisdiction[],
-  limit = 100
+  limit = 100,
+  includeClaims = false
 ): Promise<QueryResult> {
-  const sql = buildKeywordSearchQuery({ keywords, jurisdictions, limit });
+  const sql = buildKeywordSearchQuery({ keywords, jurisdictions, limit, includeClaims });
 
   try {
     const { rows, bytesProcessed } = await runQuery<Record<string, unknown>>(sql);

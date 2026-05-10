@@ -5,8 +5,9 @@ import { cancelSearch } from '@priovex/queue';
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
   const { userId: clerkId } = await auth();
   if (!clerkId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
@@ -14,7 +15,7 @@ export async function GET(
   if (!user) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const search = await prisma.search.findFirst({
-    where: { id: params.id, userId: user.id },
+    where: { id, userId: user.id },
     include: {
       report: true,
       progressLogs: { orderBy: { timestamp: 'desc' }, take: 100 },
@@ -28,30 +29,25 @@ export async function GET(
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params;
   const { userId: clerkId } = await auth();
   if (!clerkId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const user = await prisma.user.findUnique({ where: { clerkId } });
   if (!user) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const search = await prisma.search.findFirst({
-    where: { id: params.id, userId: user.id },
-  });
-
+  const search = await prisma.search.findFirst({ where: { id, userId: user.id } });
   if (!search) return NextResponse.json({ error: 'Search not found' }, { status: 404 });
 
-  // Try to cancel the queue job
+  // Remove from BullMQ queue if still pending/active
   if (search.bullJobId) {
     await cancelSearch(search.id).catch(() => {});
   }
 
-  // Mark as cancelled in DB (worker checks this flag)
-  await prisma.search.update({
-    where: { id: search.id },
-    data: { cancelRequested: true },
-  });
+  // Hard delete — cascades to report, progressLogs, savedPatents
+  await prisma.search.delete({ where: { id } });
 
   return NextResponse.json({ success: true });
 }

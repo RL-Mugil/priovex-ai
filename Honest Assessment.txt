@@ -1,0 +1,62 @@
+ Honest Assessment                                                                                                     
+  STRENGTHS                                                                                                             
+  1. Pipeline architecture is solid — 14 clearly defined steps, BullMQ queue, real-time progress logs. The engineering
+  foundation is production-grade.
+  2. Multi-source NPL — arXiv + Semantic Scholar + USPTO EFTS running in parallel. Most patent tools ignore academic
+  literature entirely.
+  3. EPO OPS claims retrieval — getting actual claim text for EP/WO patents is rare in DIY tools; patent attorneys need
+  this.
+  4. Coverage matrix + IDS + examiner simulation — these three together make this attorney-level output, not just a
+  search result list.
+  5. Cost engineering — prompt caching, Haiku for NPL, template IDS, one-shot coverage matrix. Thoughtful.
+  6. Partial report on cancel — small UX detail that matters a lot in a 45-min run.
+
+  REAL PROBLEMS (not sugarcoated)
+
+  1. US patent search is completely broken without GCP billing. BigQuery quota exhausts after 4–5 searches on the free
+  tier. The EPO OPS fallback only returns EP/WO patents. If you're searching for US-patent prior art (which is the
+  majority use case), you get 0 results. This is the most critical gap — the core feature doesn't work without a paid
+  GCP account.
+  2. No USPTO direct API fallback for US patents. USPTO has free public APIs (EFTS, PatentsView) that could return US
+  grants/applications. Right now when BigQuery fails, there is no US patent coverage at all — not even a degraded
+  experience.
+  3. Pre-grant US applications are completely missing. PatentsView only covers granted patents. Published applications
+  (filed ~18 months before grant) are not retrieved. A competitor could have a pending application that exactly
+  anticipates your invention and this tool would miss it entirely.
+  4. AI scores at most 30 patents out of potentially thousands. The pre-filter that picks the top 30 by keyword score is
+   naive — it counts keyword hits, nothing more. A blocking patent with unusual terminology could easily be eliminated
+  before Claude ever sees it.
+  5. PDF generation silently fails. Puppeteer launches a full Chromium browser per PDF. If Supabase is misconfigured or
+  memory is low, the PDF is lost with only a console.warn. The user sees no PDF button and no explanation. Fixing this
+  now with on-demand generation.
+  6. No test coverage. No unit tests, integration tests, or end-to-end tests visible anywhere. In a domain where output
+  has legal weight, untested AI parsing is a real liability.
+  7. Gemini provider is second-class. No prompt caching, 15 patent candidates vs Claude's 30, coverage matrix just added
+   and untested against real Gemini output variance.
+  8. 13-second delays between AI calls are baked in for rate limiting. With 6 sequential NPL analyses = 78 seconds of
+  pure sleep. This is the correct tradeoff for the free tier but will need rethinking at scale.
+
+  ---
+
+Current Cost Per Claude Search (Standard Depth)                                                                       
+  ┌───────────────────────────────┬───────────────────────────┬──────────────┬──────────────────────┬───────────┐
+  │             Step              │           Call            │    Model     │ Est. Tokens (in/out) │ Est. Cost │
+  ├───────────────────────────────┼───────────────────────────┼──────────────┼──────────────────────┼───────────┤
+  │ 1 - Concept extraction        │ extractConcepts           │ Sonnet       │ 1,180 / 600          │ $0.013    │
+  ├───────────────────────────────┼───────────────────────────┼──────────────┼──────────────────────┼───────────┤
+  │ 2 - Novel elements            │ decomposeNovelElements    │ Sonnet       │ 1,580 / 1,500        │ $0.027    │
+  ├───────────────────────────────┼───────────────────────────┼──────────────┼──────────────────────┼───────────┤
+  │ 3 - Keyword strategy          │ buildKeywordStrategy      │ Sonnet+cache │ 400 new / 800        │ $0.020    │
+  ├───────────────────────────────┼───────────────────────────┼──────────────┼──────────────────────┼───────────┤
+  │ 10 - NPL × 6                  │ analyzeNPLReference       │ Haiku        │ 600 / 600 each       │ $0.020    │
+  ├───────────────────────────────┼───────────────────────────┼──────────────┼──────────────────────┼───────────┤
+  │ 11 - Full report (30 patents) │ generateFullReport        │ Sonnet+cache │ 16,000 new / 3,000   │ $0.094    │
+  ├───────────────────────────────┼───────────────────────────┼──────────────┼──────────────────────┼───────────┤
+  │ 12 - Coverage matrix          │ analyzeCoverageMatrix     │ Sonnet+cache │ 12,500 new / 2,500   │ $0.076    │
+  ├───────────────────────────────┼───────────────────────────┼──────────────┼──────────────────────┼───────────┤
+  │ 13 - Examiner simulation      │ simulateExaminer          │ Sonnet+cache │ 1,500 / 1,500        │ $0.027    │
+  ├───────────────────────────────┼───────────────────────────┼──────────────┼──────────────────────┼───────────┤
+  │ 14 - Gap claims               │ generateGapGroundedClaims │ Sonnet+cache │ 2,000 / 2,000        │ $0.037    │
+  ├───────────────────────────────┼───────────────────────────┼──────────────┼──────────────────────┼───────────┤
+  │ Total                         │                           │              │                      │ ~$0.31    │
+  └───────────────────────────────┴───────────────────────────┴──────────────┴──────────────────────┴───────────┘

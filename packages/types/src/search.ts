@@ -2,16 +2,23 @@ export type SearchDepth = 'quick' | 'standard' | 'thorough';
 export type ReportStyle = 'legal' | 'technical' | 'investor' | 'concise' | 'comprehensive';
 export type AIProvider = 'claude' | 'openai' | 'gemini';
 export type Jurisdiction = 'US' | 'EP' | 'WO' | 'CN' | 'JP' | 'KR' | 'GB' | 'DE' | 'FR';
+export type SearchType = 'patentability' | 'invalidity' | 'fto' | 'novelty' | 'examiner_style';
 
 export type SearchStatus =
   | 'queued'
   | 'extracting'
+  | 'novel-elements'
   | 'keyword-strategy'
   | 'broad-search'
   | 'cpc-identification'
   | 'deep-cpc-search'
+  | 'npl-search'
+  | 'claims-retrieval'
   | 'timeline-analysis'
-  | 'ai-analysis'
+  | 'ai-scoring'
+  | 'coverage-analysis'
+  | 'ids-generation'
+  | 'examiner-simulation'
   | 'generating-report'
   | 'completed'
   | 'failed'
@@ -26,9 +33,11 @@ export interface SearchInput {
   claimsDraft?: string;
   jurisdictions: Jurisdiction[];
   depth: SearchDepth;
+  searchType?: SearchType;
   aiProvider: AIProvider;
   reportStyle: ReportStyle;
   uploadedDocumentIds?: string[];
+  confidentialMode?: boolean;
 }
 
 export interface SearchProgress {
@@ -41,6 +50,7 @@ export interface SearchProgress {
   progressPercent: number;
   patentsFound: number;
   patentsAnalyzed: number;
+  nplFound: number;
   estimatedMinutesRemaining: number;
   logs: ProgressLog[];
   startedAt: string;
@@ -62,10 +72,12 @@ export interface KeywordStrategy {
   technicalTerms: string[];
   cpcHints: string[];
   searchQueries: string[];
+  nplQueries: string[];       // NPL-optimized search strings
+  claimsTerms: string[];      // Claims-language terms for USPTO EFTS
 }
 
 export interface ConceptExtraction {
-  coreConceptss: string[];
+  coreConcepts: string[];
   technicalEntities: string[];
   problemDomain: string;
   solutionApproach: string;

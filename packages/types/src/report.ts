@@ -1,5 +1,16 @@
-import type { ScoredPatent, TimelineEntry, AssigneeAnalysis, CPCCode } from './patent';
-import type { AIProvider, ReportStyle, KeywordStrategy, ConceptExtraction } from './search';
+import type {
+  ScoredPatent,
+  TimelineEntry,
+  AssigneeAnalysis,
+  CPCCode,
+  NovelElement,
+  NPLReference,
+  CoverageMatrix,
+  IDSEntry,
+  ExaminerPrediction,
+  GapGroundedClaimDraft,
+} from './patent';
+import type { AIProvider, ReportStyle, KeywordStrategy, ConceptExtraction, SearchType } from './search';
 
 export type NoveltyRating = 'HIGH' | 'MEDIUM-HIGH' | 'MEDIUM' | 'MEDIUM-LOW' | 'LOW';
 export type PatentabilityVerdict = 'PROCEED' | 'PROCEED_WITH_CAUTION' | 'REFINE_FIRST' | 'UNLIKELY';
@@ -10,11 +21,12 @@ export interface PatentabilityAssessment {
   noveltyAnalysis: string;
   obviousnessRating: NoveltyRating;
   obviousnessAnalysis: string;
-  patentabilityScore: number;   // 0–100
+  patentabilityScore: number;
   keyRisks: string[];
   keyOpportunities: string[];
   whiteSpaceAreas: string[];
   recommendedClaimScope: 'broad' | 'moderate' | 'narrow';
+  featureCoverageObservations: string[];  // Per-element coverage summary
 }
 
 export interface ClaimStrategy {
@@ -38,6 +50,15 @@ export interface SearchStatistics {
   aiProvider: AIProvider;
   aiTokensUsed: number;
   aiCostUsd: number;
+  // NPL stats
+  nplSourcesSearched: string[];
+  nplReferencesFound: number;
+  nplReferencesAnalyzed: number;
+  // Coverage stats
+  novelElementsDecomposed: number;
+  coverageMatrixSize: string;     // e.g., "8 elements × 15 references"
+  // IDS stats
+  idsEntriesGenerated: number;
 }
 
 export interface PatentReport {
@@ -47,10 +68,19 @@ export interface PatentReport {
   inventionTitle: string;
   inventionDescription: string;
   reportStyle: ReportStyle;
+  searchType: SearchType;
 
   executiveSummary: string;
   patentabilityAssessment: PatentabilityAssessment;
   claimStrategy: ClaimStrategy;
+
+  // v2 — Intelligence layers
+  novelElements: NovelElement[];
+  nplReferences: NPLReference[];
+  coverageMatrix: CoverageMatrix;
+  idsEntries: IDSEntry[];
+  examinerPrediction: ExaminerPrediction;
+  gapClaimDraft: GapGroundedClaimDraft;
 
   conceptExtraction: ConceptExtraction;
   keywordStrategy: KeywordStrategy;
@@ -62,10 +92,14 @@ export interface PatentReport {
   assigneeAnalysis: AssigneeAnalysis[];
 
   statistics: SearchStatistics;
-  idsReferences: string[];       // For USPTO Information Disclosure Statement
+  idsReferences: string[];
 
-  markdownContent: string;
+  // Dual reports
+  markdownContent: string;           // Internal technical report
   htmlContent?: string;
+  clientReportContent: string;       // Clean client supplementary report
+  clientReportHtml?: string;
   pdfStorageUrl?: string;
+  clientPdfStorageUrl?: string;
   jsonStorageUrl?: string;
 }
