@@ -59,7 +59,7 @@ export async function POST(
       problemSolved: original.problemSolved,
       keyInnovations: original.keyInnovations,
       claimsDraft: original.claimsDraft ?? undefined,
-      jurisdictions: original.jurisdictions,
+      jurisdictions: original.jurisdictions as any,
       depth: original.depth.toLowerCase() as any,
       aiProvider: original.aiProvider.toLowerCase() as any,
       reportStyle: original.reportStyle.toLowerCase() as any,
