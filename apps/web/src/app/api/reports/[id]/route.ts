@@ -57,7 +57,7 @@ export async function GET(
       const pdf = await generatePDFFromHTML(html);
       const title = (report as any).inventionTitle as string | null;
       const filename = `priovex-report-${title ? title.slice(0, 40).replace(/[^a-z0-9]/gi, '-') : report.id}.pdf`;
-      return new Response(pdf, {
+      return new Response(new Uint8Array(pdf), {
         headers: {
           'Content-Type': 'application/pdf',
           'Content-Disposition': `attachment; filename="${filename}"`,
