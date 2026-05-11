@@ -75,11 +75,13 @@ jobs:
         run: npm run db:migrate
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/priovex_test
+          DATABASE_DIRECT_URL: postgresql://postgres:postgres@localhost:5432/priovex_test
 
       - name: Run tests
         run: npm test
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/priovex_test
+          DATABASE_DIRECT_URL: postgresql://postgres:postgres@localhost:5432/priovex_test
           REDIS_URL: redis://localhost:6379
 
   build:
