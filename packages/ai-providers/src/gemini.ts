@@ -21,8 +21,7 @@ import type {
   NPLReference,
   NovelElement,
 } from '@priovex/types';
-import type { AIProvider, BatchCoverageRef, RetryConfig } from './interface';
-import { withRetry } from './interface';
+import type { AIProvider, BatchCoverageRef } from './interface';
 import type { CoverageCell } from '@priovex/types';
 import {
   SYSTEM_PROMPT_PATENT_EXPERT,
@@ -38,128 +37,152 @@ import {
   buildGapGroundedClaimDraftingPrompt,
   buildIDSAnalysisPrompt,
 } from './prompts';
-
-// =============================================================================
-// Model tier configuration — override via env vars for easy upgrades
-//
-// Free-tier quota summary (as of 2025):
-//   gemini-2.5-flash      → 5 RPM, 250K TPM, 20 RPD  ← quality reasoning
-//   gemini-2.5-flash-lite → 10 RPM, 250K TPM, 20 RPD  ← medium tasks
-//   gemini-3.1-flash-lite → 15 RPM, 250K TPM, 500 RPD ← set GEMINI_VOLUME_MODEL=gemini-3.1-flash-lite
-//
-// Set in Railway env to upgrade volume model without code changes.
-// =============================================================================
-
-const QUALITY_MODEL = process.env.GEMINI_QUALITY_MODEL ?? 'gemini-2.5-flash';
-const VOLUME_MODEL  = process.env.GEMINI_VOLUME_MODEL  ?? 'gemini-2.5-flash-lite';
-
-// RPM-derived call spacing: quality 5 RPM → 13s gap; volume 10 RPM → 7s gap
-// Override when volume model has higher RPM (e.g. gemini-3.1-flash-lite at 15 RPM → 5s)
-const QUALITY_CALL_GAP_MS = 13_000;
-const VOLUME_CALL_GAP_MS  = parseInt(process.env.GEMINI_VOLUME_CALL_GAP_MS ?? '7000');
+import { GeminiModelPool, classifyError, type ModelTier } from './gemini-pool';
 
 const MAX_TOKENS        = 8192;
 const MAX_TOKENS_REPORT = 16000;
 
-const RETRY_CONFIG: RetryConfig = {
-  maxRetries:     4,
-  initialDelayMs: 2_000,
-  maxDelayMs:     60_000,
-  backoffFactor:  2,
-};
-
-// =============================================================================
-// Error classification helpers
-// =============================================================================
-
-type GeminiErrorKind = 'quota_exceeded' | 'rate_limit' | 'api_unavailable' | 'json_parse' | 'unknown';
-
-function classifyGeminiError(err: unknown): { kind: GeminiErrorKind; message: string } {
-  const msg = err instanceof Error ? err.message : String(err);
-
-  if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('quota') || msg.includes('Quota')) {
-    return { kind: 'quota_exceeded', message: `Gemini quota exhausted (daily/minute limit reached). Model: ${VOLUME_MODEL}. Error: ${msg.slice(0, 200)}` };
-  }
-  if (msg.includes('429') || msg.includes('Too Many Requests') || msg.includes('rate limit') || msg.includes('Rate limit')) {
-    return { kind: 'rate_limit', message: `Gemini rate limit hit. Will retry with 70s delay. Error: ${msg.slice(0, 200)}` };
-  }
-  if (msg.includes('500') || msg.includes('503') || msg.includes('Internal Server Error') || msg.includes('Service Unavailable')) {
-    return { kind: 'api_unavailable', message: `Gemini API transient error (${msg.slice(0, 80)}). Retrying...` };
-  }
-  if (msg.includes('parse') || msg.includes('JSON') || msg.includes('Unexpected token')) {
-    return { kind: 'json_parse', message: `Gemini returned malformed JSON. Raw response may be truncated or contain markdown. Error: ${msg.slice(0, 200)}` };
-  }
-  return { kind: 'unknown', message: msg };
-}
-
-// =============================================================================
-// GeminiProvider
-// =============================================================================
+// Minimum gap between sequential calls (ms) — respects the slowest tier's RPM.
+// Volume calls on standard tier (15 RPM) can use 5s; quality (5 RPM) needs 13s.
+// The pool picks the best model, so we use a moderate default that works for any tier.
+const CALL_GAP_MS = parseInt(process.env.GEMINI_CALL_GAP_MS ?? '5000');
 
 export class GeminiProvider implements AIProvider {
   readonly name         = 'Google Gemini';
-  readonly model        = QUALITY_MODEL;
+  readonly model        = 'gemini-2.5-flash';   // primary quality model
   readonly providerType = 'gemini' as const;
 
-  private genAI: GoogleGenerativeAI;
-  private totalTokensUsed = 0;
-
-  // Per-model call counters for logging (does not enforce limits — just informs)
-  private callCount: Record<string, number> = {};
+  private genAI:          GoogleGenerativeAI;
+  private pool:           GeminiModelPool;
+  private totalTokens     = 0;
+  private progressLogger?: (level: string, message: string) => void;
 
   constructor(apiKey: string) {
     this.genAI = new GoogleGenerativeAI(apiKey);
+    this.pool  = new GeminiModelPool();
+
+    // Wire pool switch events to the progress logger
+    this.pool.setOnSwitch((ev) => {
+      const reasonStr =
+        ev.reason === 'initial'        ? 'started on'  :
+        ev.reason === 'rate_limit'     ? 'rate-limited → switched to' :
+        ev.reason === 'quota_exceeded' ? 'quota exhausted → switched to' :
+        ev.reason === 'api_error'      ? 'API error → switched to' :
+                                         'error → switched to';
+
+      if (ev.reason === 'initial') {
+        this.plog('INFO', `[AI] Using ${ev.toModel} for ${ev.task}`);
+      } else {
+        this.plog('WARN',
+          `[AI] ${ev.fromModel} ${reasonStr} ${ev.toModel} during "${ev.task}"`
+        );
+      }
+    });
+  }
+
+  // Called by the pipeline to route log messages into the search progress DB
+  setProgressLogger(fn: (level: string, message: string) => void): void {
+    this.progressLogger = fn;
+  }
+
+  private plog(level: string, message: string): void {
+    console.log(`[Gemini] ${message}`);
+    this.progressLogger?.(level, message);
   }
 
   // ==========================================================================
-  // Internal chat — routes to the specified model tier
+  // Core chat — tries models in pool order, fails over on rate-limit/API errors
   // ==========================================================================
 
   private async chat(
-    userMessage: string,
-    maxTokens = MAX_TOKENS,
-    model = QUALITY_MODEL,
-  ): Promise<{ text: string; tokens: number }> {
-    this.callCount[model] = (this.callCount[model] ?? 0) + 1;
-    const callNum = this.callCount[model];
+    prompt:       string,
+    maxTokens:    number,
+    tier:         ModelTier,
+    taskLabel:    string,
+  ): Promise<{ text: string; tokens: number; modelUsed: string }> {
+    const candidates = this.pool.getModelsForTier(tier, prompt.length);
 
-    return withRetry(async () => {
-      const genModel = this.genAI.getGenerativeModel({
-        model,
-        systemInstruction: SYSTEM_PROMPT_PATENT_EXPERT,
-        safetySettings: [
-          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-        ],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          maxOutputTokens: maxTokens,
-          temperature: 0.3,
-        },
-      });
+    if (candidates.length === 0) {
+      throw new Error(
+        `[Gemini] All models rate-limited or unavailable for task "${taskLabel}". ` +
+        `Pool state: ${this.pool.getSummary()}`
+      );
+    }
 
-      const result = await genModel.generateContent(userMessage);
-      const text   = result.response.text();
-      const tokens = result.response.usageMetadata?.totalTokenCount ?? 0;
-      this.totalTokensUsed += tokens;
+    let firstModel = true;
+    for (const model of candidates) {
+      if (firstModel) {
+        this.pool.emitSwitch('', model.id, 'initial', taskLabel);
+        firstModel = false;
+      }
 
-      console.log(`[Gemini] ${model} call #${callNum} — ${tokens} tokens used (session total: ${this.totalTokensUsed})`);
-      return { text, tokens };
-    }, RETRY_CONFIG, `Gemini/${model} call #${callNum}`);
+      this.pool.recordCall(model.id);
+      const isGemma = model.id.startsWith('gemma-');
+
+      try {
+        const genModel = this.genAI.getGenerativeModel({
+          model:            model.id,
+          systemInstruction: SYSTEM_PROMPT_PATENT_EXPERT,
+          safetySettings: [
+            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+          ],
+          generationConfig: {
+            // Gemma models don't reliably honour responseMimeType — parse manually
+            ...(isGemma ? {} : { responseMimeType: 'application/json' }),
+            maxOutputTokens: maxTokens,
+            temperature:     0.3,
+          },
+        });
+
+        const result  = await genModel.generateContent(prompt);
+        const text    = result.response.text();
+        const tokens  = result.response.usageMetadata?.totalTokenCount ?? 0;
+        this.totalTokens += tokens;
+
+        this.plog('INFO',
+          `[AI] ${model.displayName} ✓ "${taskLabel}" — ${tokens} tokens ` +
+          `(session total: ${this.totalTokens})`
+        );
+        return { text, tokens, modelUsed: model.displayName };
+
+      } catch (err) {
+        const { kind, userMessage } = classifyError(err);
+        this.pool.markError(model.id, kind);
+
+        const nextCandidates = this.pool.getModelsForTier(tier, prompt.length);
+        const nextModel      = nextCandidates[0];
+
+        if (nextModel) {
+          this.pool.emitSwitch(model.id, nextModel.id, kind, taskLabel);
+          this.plog('WARN', `[AI] ${userMessage} — trying ${nextModel.displayName} next`);
+          // continue to next iteration
+        } else {
+          this.plog('WARN', `[AI] ${userMessage} — no models remaining in pool`);
+          throw new Error(
+            `[Gemini] All models exhausted for "${taskLabel}". Last error: ${userMessage}`
+          );
+        }
+      }
+    }
+
+    throw new Error(`[Gemini] All models in pool failed for task "${taskLabel}"`);
   }
 
   // ==========================================================================
-  // JSON parsing with detailed error classification
+  // JSON parsing — handles markdown fences and partial JSON
   // ==========================================================================
 
-  private parseJSON<T>(text: string, context = 'response'): T {
+  private parseJSON<T>(text: string, context: string): T {
     const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
     try { return JSON.parse(clean) as T; } catch { /* fall through */ }
     const match = clean.match(/^[\s\S]*?([\[{][\s\S]*[\]}])/);
     const candidate = match ? match[1] : clean;
     try { return JSON.parse(candidate) as T; } catch { /* fall through */ }
-    const { message } = classifyGeminiError(new Error(`JSON parse failed for ${context}`));
-    throw new Error(`${message} — snippet: ${clean.slice(0, 300)}`);
+    throw new Error(
+      `[Gemini] JSON parse failed for "${context}". ` +
+      `Response snippet (${clean.length} chars): ${clean.slice(0, 300)}`
+    );
   }
 
   // ==========================================================================
@@ -167,13 +190,11 @@ export class GeminiProvider implements AIProvider {
   // ==========================================================================
 
   async extractConcepts(
-    inventionTitle: string,
-    inventionDescription: string,
-    technicalField: string,
-    keyInnovations: string[]
+    inventionTitle: string, inventionDescription: string,
+    technicalField: string, keyInnovations: string[]
   ): Promise<ConceptExtraction> {
     const prompt = buildConceptExtractionPrompt(inventionTitle, inventionDescription, technicalField, keyInnovations);
-    const { text } = await this.chat(prompt, MAX_TOKENS, QUALITY_MODEL);
+    const { text } = await this.chat(prompt, MAX_TOKENS, 'quality', 'concept extraction');
     return this.parseJSON<ConceptExtraction>(text, 'concept extraction');
   }
 
@@ -186,85 +207,90 @@ export class GeminiProvider implements AIProvider {
       input.inventionTitle, input.inventionDescription, input.technicalField,
       input.problemSolved, input.keyInnovations, input.claimsDraft
     );
-    const { text } = await this.chat(prompt, MAX_TOKENS, QUALITY_MODEL);
+    const { text } = await this.chat(prompt, MAX_TOKENS, 'quality', 'novel element decomposition');
     return this.parseJSON<NovelElementDecompositionOutput>(text, 'novel element decomposition');
   }
 
   // ==========================================================================
-  // VOLUME TIER — Step 3: Keyword Strategy (routine, many synonyms)
+  // STANDARD TIER — Step 3: Keyword Strategy
   // ==========================================================================
 
   async buildKeywordStrategy(concepts: ConceptExtraction, technicalField: string): Promise<KeywordStrategy> {
     const prompt = buildKeywordStrategyPrompt(JSON.stringify(concepts), technicalField);
-    const { text } = await this.chat(prompt, MAX_TOKENS, VOLUME_MODEL);
+    const { text } = await this.chat(prompt, MAX_TOKENS, 'standard', 'keyword strategy');
     return this.parseJSON<KeywordStrategy>(text, 'keyword strategy');
   }
 
   // ==========================================================================
-  // VOLUME TIER — Patent comparison (called ~15× per search in step 10)
-  // Uses VOLUME_MODEL to spread RPD load; shorter call gap possible
+  // STANDARD TIER — Patent comparison (called ~15× per search)
   // ==========================================================================
 
   async compareInventionToPatent(input: ComparisonInput): Promise<ComparisonOutput> {
     const prompt = buildPatentComparisonPrompt(
-      input.inventionDescription,
-      input.patent.title,
-      input.patent.abstract,
-      input.patent.claims
+      input.inventionDescription, input.patent.title,
+      input.patent.abstract, input.patent.claims
     );
-    const { text } = await this.chat(prompt, MAX_TOKENS, VOLUME_MODEL);
+    const { text } = await this.chat(
+      prompt, MAX_TOKENS, 'standard',
+      `patent comparison: ${input.patent.publicationNumber ?? 'unknown'}`
+    );
     return this.parseJSON<ComparisonOutput>(text, `patent comparison: ${input.patent.publicationNumber}`);
   }
 
   // ==========================================================================
-  // VOLUME TIER — NPL analysis (called ~6× per search in step 10)
+  // STANDARD TIER — NPL analysis (called ~6× per search)
   // ==========================================================================
 
   async analyzeNPLReference(
     inventionDescription: string, nplTitle: string, nplAbstract: string, nplSource: string
   ) {
     const prompt = buildNPLAnalysisPrompt(inventionDescription, nplTitle, nplAbstract, nplSource);
-    const { text } = await this.chat(prompt, MAX_TOKENS, VOLUME_MODEL);
+    const { text } = await this.chat(
+      prompt, MAX_TOKENS, 'standard',
+      `NPL: ${nplTitle.slice(0, 50)}`
+    );
     return this.parseJSON<{
       similarityScore: number; similarities: string[]; differences: string[];
       noveltyImpact: 'blocking' | 'strong' | 'moderate' | 'weak' | 'minimal';
       analysis: string; anticipationRisk: number; obviousnessRisk: number;
       isSuitable103Combination: boolean; disclosureNote: string;
-    }>(text, `NPL analysis: ${nplTitle.slice(0, 60)}`);
+    }>(text, `NPL analysis: ${nplTitle.slice(0, 50)}`);
   }
 
   // ==========================================================================
-  // VOLUME TIER — Coverage matrix (large batch, many references)
+  // STANDARD TIER — Coverage per-reference (fallback from batch)
   // ==========================================================================
 
   async analyzeCoverageForReference(input: CoverageAnalysisInput): Promise<CoverageAnalysisOutput> {
-    const elements = input.novelElements.map((e) => ({ id: e.id, label: e.label, claimLanguage: e.claimLanguage }));
-    const prompt = buildCoverageAnalysisPrompt(input.inventionDescription, elements, input.reference);
-    const { text } = await this.chat(prompt, MAX_TOKENS, VOLUME_MODEL);
-    return this.parseJSON<CoverageAnalysisOutput>(text, `coverage analysis: ${input.reference.id}`);
+    const elements = input.novelElements.map(e => ({ id: e.id, label: e.label, claimLanguage: e.claimLanguage }));
+    const prompt   = buildCoverageAnalysisPrompt(input.inventionDescription, elements, input.reference);
+    const { text } = await this.chat(
+      prompt, MAX_TOKENS, 'standard',
+      `coverage: ${input.reference.id}`
+    );
+    return this.parseJSON<CoverageAnalysisOutput>(text, `coverage: ${input.reference.id}`);
   }
 
+  // ==========================================================================
+  // FALLBACK TIER — Coverage matrix batch (large context, use fallback or better)
+  // ==========================================================================
+
   async analyzeCoverageMatrix(
-    inventionDescription: string,
-    novelElements: NovelElement[],
-    references: BatchCoverageRef[]
+    inventionDescription: string, novelElements: NovelElement[], references: BatchCoverageRef[]
   ): Promise<Record<string, Record<string, CoverageCell>>> {
-    const prompt = buildCoverageMatrixBatchPrompt(inventionDescription, novelElements, references);
-    const { text } = await this.chat(prompt, MAX_TOKENS_REPORT, VOLUME_MODEL);
+    const prompt   = buildCoverageMatrixBatchPrompt(inventionDescription, novelElements, references);
+    const { text } = await this.chat(prompt, MAX_TOKENS_REPORT, 'fallback', 'coverage matrix batch');
 
     let raw: Record<string, Record<string, { state: string; reasoning: string; confidenceScore: number; evidence: string }>> = {};
     try {
       raw = this.parseJSON(text, 'coverage matrix batch');
     } catch (err) {
-      const { message } = classifyGeminiError(err);
-      console.warn(`[Gemini] Coverage matrix parse failed: ${message}`);
+      this.plog('WARN', `[AI] Coverage matrix parse failed — returning empty matrix. ${(err as Error).message.slice(0, 120)}`);
       return {};
     }
 
-    const validStates = new Set<CoverageCell['state']>(['fully_covered', 'partially_covered', 'implied', 'not_covered', 'ambiguous']);
-    const stateAliases: Record<string, CoverageCell['state']> = {
-      covered: 'fully_covered', partial: 'partially_covered', unknown: 'ambiguous',
-    };
+    const validStates  = new Set<CoverageCell['state']>(['fully_covered', 'partially_covered', 'implied', 'not_covered', 'ambiguous']);
+    const stateAliases: Record<string, CoverageCell['state']> = { covered: 'fully_covered', partial: 'partially_covered', unknown: 'ambiguous' };
     const result: Record<string, Record<string, CoverageCell>> = {};
 
     for (const [elementId, refs] of Object.entries(raw)) {
@@ -275,12 +301,8 @@ export class GeminiProvider implements AIProvider {
           ? rawState as CoverageCell['state']
           : (stateAliases[rawState] ?? 'ambiguous');
         result[elementId][refId] = {
-          state,
-          reasoning:       cell.reasoning       ?? '',
-          confidenceScore: cell.confidenceScore ?? 50,
-          evidence:        cell.evidence        ?? '',
-          claimCitation:   undefined,
-          figureReferences: [],
+          state, reasoning: cell.reasoning ?? '', confidenceScore: cell.confidenceScore ?? 50,
+          evidence: cell.evidence ?? '', claimCitation: undefined, figureReferences: [],
         };
       }
     }
@@ -288,35 +310,32 @@ export class GeminiProvider implements AIProvider {
   }
 
   // ==========================================================================
-  // QUALITY TIER — Step 10: Full Report (executive summary + patentability)
+  // QUALITY TIER — Step 10: Full report (scoring uses STANDARD, synthesis uses QUALITY)
   // ==========================================================================
 
   async generateFullReport(input: AIAnalysisInput): Promise<AIAnalysisOutput> {
+    const candidates = input.candidatePatents.slice(0, 15);
     const scoredPatents: ScoredPatent[] = [];
 
-    // Score top 15 candidates using VOLUME_MODEL — this is the high-call loop
-    const candidates = input.candidatePatents.slice(0, 15);
-    console.log(`[Gemini] Scoring ${candidates.length} patents with ${VOLUME_MODEL} (${VOLUME_CALL_GAP_MS / 1000}s gap between calls)`);
+    this.plog('INFO',
+      `[AI] Scoring ${candidates.length} patents with STANDARD tier (${CALL_GAP_MS / 1000}s gap between calls)`
+    );
 
     for (let i = 0; i < candidates.length; i++) {
       const p = candidates[i];
       try {
         const result = await this.compareInventionToPatent({
           inventionDescription: `${input.inventionTitle}: ${input.inventionDescription}`,
-          patent: {
-            publicationNumber: p.publicationNumber,
-            title: p.title,
-            abstract: p.abstract,
-            claims: p.claims,
-          },
+          patent: { publicationNumber: p.publicationNumber, title: p.title, abstract: p.abstract, claims: p.claims },
         });
         scoredPatents.push({ ...p, ...result, rank: scoredPatents.length + 1 });
       } catch (err) {
-        const { kind, message } = classifyGeminiError(err);
-        console.warn(`[Gemini] Patent ${p.publicationNumber} scoring skipped [${kind}]: ${message.slice(0, 120)}`);
+        this.plog('WARN',
+          `[AI] Patent ${p.publicationNumber} skipped — ${(err as Error).message.slice(0, 100)}`
+        );
       }
       if (i < candidates.length - 1) {
-        await new Promise((r) => setTimeout(r, VOLUME_CALL_GAP_MS));
+        await new Promise(r => setTimeout(r, CALL_GAP_MS));
       }
     }
 
@@ -330,64 +349,59 @@ export class GeminiProvider implements AIProvider {
     ).join('\n\n');
 
     const nplSummary      = buildNPLSummary(input.nplReferences ?? []);
-    const coverageSummary = input.novelElements && input.novelElements.length > 0
+    const coverageSummary = input.novelElements?.length
       ? buildCoverageSummary(input.novelElements)
       : undefined;
 
-    // Final synthesis uses QUALITY_MODEL — one call, highest quality needed
-    console.log(`[Gemini] Generating final report synthesis with ${QUALITY_MODEL}`);
+    this.plog('INFO', `[AI] Generating final report synthesis with QUALITY tier`);
+
     const reportPrompt = buildFullReportPrompt(
-      input.inventionTitle,
-      input.inventionDescription,
-      input.technicalField,
-      input.keyInnovations,
-      topPatentsStr,
-      input.reportStyle,
-      nplSummary,
-      coverageSummary
+      input.inventionTitle, input.inventionDescription, input.technicalField,
+      input.keyInnovations, topPatentsStr, input.reportStyle, nplSummary, coverageSummary
     );
 
-    const { text } = await this.chat(reportPrompt, MAX_TOKENS_REPORT, QUALITY_MODEL);
-
+    const { text } = await this.chat(reportPrompt, MAX_TOKENS_REPORT, 'quality', 'full report synthesis');
     const reportData = this.parseJSON<{
       executiveSummary: string;
       patentabilityAssessment: AIAnalysisOutput['patentabilityAssessment'];
       claimStrategy: AIAnalysisOutput['claimStrategy'];
     }>(text, 'full report synthesis');
 
-    const costUsd = (this.totalTokensUsed / 1_000_000) * 0.15;
-    console.log(`[Gemini] Session complete — quality model (${QUALITY_MODEL}): ${this.callCount[QUALITY_MODEL] ?? 0} calls | volume model (${VOLUME_MODEL}): ${this.callCount[VOLUME_MODEL] ?? 0} calls | total tokens: ${this.totalTokensUsed}`);
+    const summary = this.pool.getSummary();
+    this.plog('INFO',
+      `[AI] Gemini session complete — models used: ${summary} | total tokens: ${this.totalTokens}`
+    );
 
     return {
       executiveSummary: reportData.executiveSummary,
       scoredPatents,
       patentabilityAssessment: reportData.patentabilityAssessment,
       claimStrategy: reportData.claimStrategy,
-      tokensUsed: this.totalTokensUsed,
-      costUsd,
-      model: QUALITY_MODEL,
+      tokensUsed: this.totalTokens,
+      costUsd: (this.totalTokens / 1_000_000) * 0.15,
+      model: `gemini-pool (${summary})`,
       provider: 'gemini',
     };
   }
 
   // ==========================================================================
-  // QUALITY TIER — Step 13: Examiner Simulation (legal reasoning quality)
+  // QUALITY TIER — Examiner simulation (legal reasoning)
   // ==========================================================================
 
   async simulateExaminer(input: ExaminerSimulationInput): Promise<ExaminerPrediction> {
     const prompt = buildExaminerSimulationPrompt(
       input.inventionTitle, input.inventionDescription, input.technicalField,
-      input.novelElements.map((e) => ({ id: e.id, claimLanguage: e.claimLanguage })),
-      input.topPatents.slice(0, 8).map((p) => p.publicationNumber),
-      input.topPatents.slice(0, 8).map((p) => p.title),
+      input.novelElements.map(e => ({ id: e.id, claimLanguage: e.claimLanguage })),
+      input.topPatents.slice(0, 8).map(p => p.publicationNumber),
+      input.topPatents.slice(0, 8).map(p => p.title),
       input.cpcCodes
     );
-    const { text } = await this.chat(prompt, MAX_TOKENS, QUALITY_MODEL);
+    const { text } = await this.chat(prompt, MAX_TOKENS, 'quality', 'examiner simulation');
     return this.parseJSON<ExaminerPrediction>(text, 'examiner simulation');
   }
 
   // ==========================================================================
-  // QUALITY TIER — Step 13: Gap-Grounded Claim Drafting
+  // QUALITY TIER — Gap-grounded claim drafting
   // ==========================================================================
 
   async generateGapGroundedClaims(input: GapClaimDraftInput): Promise<GapGroundedClaimDraft> {
@@ -398,27 +412,26 @@ export class GeminiProvider implements AIProvider {
       input.inventionTitle, input.inventionDescription, input.technicalField,
       input.novelElements, buildCoverageSummary(input.novelElements), topPatentsStr
     );
-    const { text } = await this.chat(prompt, MAX_TOKENS, QUALITY_MODEL);
-    return this.parseJSON<GapGroundedClaimDraft>(text, 'gap-grounded claim draft');
+    const { text } = await this.chat(prompt, MAX_TOKENS, 'quality', 'gap claim drafting');
+    return this.parseJSON<GapGroundedClaimDraft>(text, 'gap claim drafting');
   }
 
   // ==========================================================================
-  // VOLUME TIER — IDS analysis
+  // STANDARD TIER — IDS analysis
   // ==========================================================================
 
   async generateIDSAnalysis(input: IDSAnalysisInput): Promise<IDSEntry[]> {
     const refs = [
-      ...input.patents.slice(0, 15).map((p) => ({
-        id: p.publicationNumber, type: 'patent' as const,
-        number: p.publicationNumber, title: p.title, abstract: p.abstract,
+      ...input.patents.slice(0, 15).map(p => ({
+        id: p.publicationNumber, type: 'patent' as const, number: p.publicationNumber, title: p.title, abstract: p.abstract,
       })),
-      ...input.nplReferences.slice(0, 10).map((n) => ({
+      ...input.nplReferences.slice(0, 10).map(n => ({
         id: n.id, type: 'npl' as const, title: n.title, abstract: n.abstract,
       })),
     ];
-    if (refs.length === 0) return [];
-    const prompt = buildIDSAnalysisPrompt(input.inventionDescription, refs);
-    const { text } = await this.chat(prompt, MAX_TOKENS, VOLUME_MODEL);
+    if (!refs.length) return [];
+    const prompt   = buildIDSAnalysisPrompt(input.inventionDescription, refs);
+    const { text } = await this.chat(prompt, MAX_TOKENS, 'standard', 'IDS analysis');
     return this.parseJSON<IDSEntry[]>(text, 'IDS analysis');
   }
 
@@ -427,11 +440,18 @@ export class GeminiProvider implements AIProvider {
   // ==========================================================================
 
   async summarizePatent(input: PatentSummaryInput): Promise<string> {
-    const genModel = this.genAI.getGenerativeModel({ model: VOLUME_MODEL });
-    const result = await genModel.generateContent(
+    const candidates = this.pool.getModelsForTier('standard');
+    const modelId    = candidates[0]?.id ?? 'gemini-2.5-flash';
+    const genModel   = this.genAI.getGenerativeModel({ model: modelId });
+    const result     = await genModel.generateContent(
       `Summarize in 2-3 sentences:\nTitle: ${input.title}\nAbstract: ${input.abstract}`
     );
     return result.response.text().trim();
+  }
+
+  // Expose pool call counts for reporting/statistics
+  getModelCallCounts(): Record<string, number> {
+    return this.pool.getCallCounts();
   }
 }
 
@@ -440,14 +460,14 @@ export class GeminiProvider implements AIProvider {
 // =============================================================================
 
 function buildNPLSummary(nplRefs: NPLReference[]): string {
-  if (nplRefs.length === 0) return '';
+  if (!nplRefs.length) return '';
   return nplRefs.slice(0, 5).map((r, i) =>
     `NPL ${i + 1}: "${r.title}" (${r.source}, score: ${r.relevanceScore}) — ${r.abstract.slice(0, 150)}...`
   ).join('\n');
 }
 
 function buildCoverageSummary(elements: NovelElement[]): string {
-  return elements.map((e) =>
+  return elements.map(e =>
     `Element [${e.label}] "${e.claimLanguage.slice(0, 80)}..." — Coverage: pending analysis`
   ).join('\n');
 }

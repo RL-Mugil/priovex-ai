@@ -169,6 +169,11 @@ export async function runSearchPipeline(
     const aiProvider = await createProviderWithFallback(input.aiProvider);
     _accAiModel = aiProvider.model;
 
+    // Wire AI model-switch events into the live progress log (visible in web UI)
+    aiProvider.setProgressLogger?.((level, message) => {
+      log(level as LogLevel, message).catch(() => {});
+    });
+
     if (aiProvider.providerType !== input.aiProvider) {
       await log(LogLevel.WARN,
         `Provider fallback active: requested '${input.aiProvider}', running with '${aiProvider.providerType}' (${aiProvider.name} / ${aiProvider.model})`

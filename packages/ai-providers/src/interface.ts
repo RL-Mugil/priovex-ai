@@ -92,6 +92,9 @@ export interface AIProvider {
     novelElements: NovelElement[]
   ): void;
 
+  // Optional — wire in to get live AI logs (model switches, token counts) in search progress
+  setProgressLogger?(fn: (level: string, message: string) => void): void;
+
   analyzeCoverageMatrix?(
     inventionDescription: string,
     novelElements: NovelElement[],
