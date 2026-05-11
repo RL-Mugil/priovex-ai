@@ -1,46 +1,42 @@
 // Gemini model pool — automatic failover across all available free-tier models
 //
-// If any model ID fails with "model not found", update it here or in env:
+// If any model ID fails with "model not found" (404), update it here or in env:
 //   GEMINI_POOL_OVERRIDES (JSON array) e.g.:
-//   [{"id":"gemma-4-27b-it","displayName":"Gemma 4 27B","tier":"fallback","rpm":15,"tpmK":null}]
+//   [{"id":"gemini-2.5-flash-lite","displayName":"Gemini 2.5 Flash Lite","tier":"fallback","rpm":30,"tpmK":1000}]
 //
-// Free-tier quota snapshot (Google AI Studio — update as your limits change):
-//   gemini-2.5-flash       5 RPM  250K TPM  500 RPD  ← quality reasoning
-//   gemini-2.0-flash       15 RPM 1M TPM    1.5K RPD ← standard volume (confirmed working)
-//   gemini-1.5-flash       15 RPM 1M TPM    1.5K RPD ← standard fallback
-//   gemini-1.5-flash-8b    15 RPM 1M TPM    1.5K RPD ← micro tasks
-//   gemma-3-27b-it         30 RPM 15K TPM   14.4K RPD ← large-prompt open model
-//   gemma-3-12b-it         30 RPM 15K TPM   14.4K RPD ← medium open model
+// Free-tier quota snapshot (Google AI Studio — confirmed working May 2026):
+//   gemini-2.5-flash       5 RPM  250K TPM   500 RPD  ← quality reasoning
+//   gemini-2.0-flash       15 RPM 1M TPM    1.5K RPD  ← standard volume
+//   gemini-2.0-flash-lite  30 RPM 1M TPM    1.5K RPD  ← high-volume fallback
+//
+// Removed (404 Not Found as of May 2026):
+//   gemini-1.5-flash, gemini-1.5-flash-8b, gemma-3-27b-it, gemma-3-12b-it
 
 export type ModelTier = 'quality' | 'standard' | 'fallback' | 'micro';
-export type ErrorKind = 'rate_limit' | 'quota_exceeded' | 'api_error' | 'json_parse' | 'unknown';
+export type ErrorKind = 'rate_limit' | 'quota_exceeded' | 'api_error' | 'not_found' | 'json_parse' | 'unknown';
 
 export interface PooledModel {
   id:              string;
   displayName:     string;
   rpm:             number;
-  tpmK:            number;    // tokens/min in thousands; Infinity = unlimited
+  tpmK:            number;    // tokens/min in thousands
   tier:            ModelTier;
-  maxInputChars?:  number;    // skip model if prompt exceeds this (Gemma 3: ~30K chars ≈ 7.5K tokens)
+  maxInputChars?:  number;
 }
 
-// Central catalog — confirmed Google AI free-tier model IDs (verified against API)
-// Ordered: quality-first, fallback last
+// Confirmed working Google AI free-tier model IDs (verified May 2026)
 const DEFAULT_POOL: PooledModel[] = [
-  { id: 'gemini-2.5-flash',    displayName: 'Gemini 2.5 Flash',    rpm: 5,  tpmK: 250,  tier: 'quality'  },
-  { id: 'gemini-2.0-flash',    displayName: 'Gemini 2.0 Flash',    rpm: 15, tpmK: 1000, tier: 'standard' },
-  { id: 'gemini-1.5-flash',    displayName: 'Gemini 1.5 Flash',    rpm: 15, tpmK: 1000, tier: 'standard' },
-  { id: 'gemini-1.5-flash-8b', displayName: 'Gemini 1.5 Flash 8B', rpm: 15, tpmK: 1000, tier: 'fallback' },
-  { id: 'gemma-3-27b-it',      displayName: 'Gemma 3 27B',         rpm: 30, tpmK: 15,   tier: 'micro',   maxInputChars: 28_000 },
-  { id: 'gemma-3-12b-it',      displayName: 'Gemma 3 12B',         rpm: 30, tpmK: 15,   tier: 'micro',   maxInputChars: 28_000 },
+  { id: 'gemini-2.5-flash',      displayName: 'Gemini 2.5 Flash',      rpm: 5,  tpmK: 250,  tier: 'quality'  },
+  { id: 'gemini-2.0-flash',      displayName: 'Gemini 2.0 Flash',      rpm: 15, tpmK: 1000, tier: 'standard' },
+  { id: 'gemini-2.0-flash-lite', displayName: 'Gemini 2.0 Flash Lite', rpm: 30, tpmK: 1000, tier: 'fallback' },
 ];
 
-// Tier ordering for fallback priority
 const TIER_ORDER: ModelTier[] = ['quality', 'standard', 'fallback', 'micro'];
 
-const RATE_LIMIT_COOLDOWN_MS  = 65_000;        // 429 → 65s cooldown
-const QUOTA_COOLDOWN_MS       = 5 * 60_000;    // daily quota exhausted → 5 min pause
-const API_ERROR_COOLDOWN_MS   = 30_000;        // 5xx transient → 30s cooldown
+const RATE_LIMIT_COOLDOWN_MS  = 65_000;              // 429 → 65s cooldown
+const QUOTA_COOLDOWN_MS       = 5 * 60_000;          // daily quota exhausted → 5 min pause
+const API_ERROR_COOLDOWN_MS   = 30_000;              // 5xx transient → 30s cooldown
+const NOT_FOUND_COOLDOWN_MS   = Number.MAX_SAFE_INTEGER; // 404 → disabled for entire session
 
 export interface SwitchEvent {
   fromModel:  string;
@@ -63,7 +59,6 @@ export class GeminiModelPool {
   private onSwitch?: (ev: SwitchEvent) => void;
 
   constructor(overrides?: Partial<PooledModel>[]) {
-    // Allow env-level overrides for model IDs (e.g. when Google renames a model)
     let catalog = [...DEFAULT_POOL];
     if (overrides?.length) {
       for (const ov of overrides) {
@@ -72,7 +67,6 @@ export class GeminiModelPool {
         else if (ov.id && ov.displayName && ov.tier) catalog.push(ov as PooledModel);
       }
     }
-    // Parse GEMINI_POOL_OVERRIDES env var if present
     const envOverride = process.env.GEMINI_POOL_OVERRIDES;
     if (envOverride) {
       try {
@@ -80,6 +74,7 @@ export class GeminiModelPool {
         for (const ov of parsed) {
           const idx = catalog.findIndex(m => m.id === ov.id);
           if (idx >= 0) Object.assign(catalog[idx], ov);
+          else if (ov.id && ov.displayName && ov.tier) catalog.push(ov as PooledModel);
         }
       } catch {
         console.warn('[GeminiPool] GEMINI_POOL_OVERRIDES is invalid JSON — ignored');
@@ -93,10 +88,9 @@ export class GeminiModelPool {
     this.onSwitch = fn;
   }
 
-  // Returns models ordered for the given tier, skipping locked/too-large ones
   getModelsForTier(preferredTier: ModelTier, promptLength = 0): PooledModel[] {
-    const now       = Date.now();
-    const prefIdx   = TIER_ORDER.indexOf(preferredTier);
+    const now     = Date.now();
+    const prefIdx = TIER_ORDER.indexOf(preferredTier);
 
     return this.models
       .filter(m => {
@@ -106,11 +100,9 @@ export class GeminiModelPool {
         return true;
       })
       .sort((a, b) => {
-        // 1. Prefer models closest to the requested tier
         const aDist = Math.abs(TIER_ORDER.indexOf(a.tier) - prefIdx);
         const bDist = Math.abs(TIER_ORDER.indexOf(b.tier) - prefIdx);
         if (aDist !== bDist) return aDist - bDist;
-        // 2. Within same distance: higher RPM first (more headroom)
         return b.rpm - a.rpm;
       });
   }
@@ -128,6 +120,7 @@ export class GeminiModelPool {
       case 'rate_limit':     s.lockedUntil = Date.now() + RATE_LIMIT_COOLDOWN_MS;  break;
       case 'quota_exceeded': s.lockedUntil = Date.now() + QUOTA_COOLDOWN_MS;       break;
       case 'api_error':      s.lockedUntil = Date.now() + API_ERROR_COOLDOWN_MS;   break;
+      case 'not_found':      s.lockedUntil = NOT_FOUND_COOLDOWN_MS;               break;
       default: break; // json_parse / unknown: don't lock — may be prompt-specific
     }
   }
@@ -140,7 +133,6 @@ export class GeminiModelPool {
     this.onSwitch?.(ev);
   }
 
-  // Human-readable session summary for logs and report
   getSummary(): string {
     const used = this.models.filter(m => (this.state.get(m.id)?.callCount ?? 0) > 0);
     if (!used.length) return 'no calls made';
@@ -167,6 +159,14 @@ export class GeminiModelPool {
 export function classifyError(err: unknown): { kind: ErrorKind; userMessage: string } {
   const raw = err instanceof Error ? err.message : String(err);
 
+  // Model does not exist — disable for entire session, no point retrying
+  if (raw.includes('404') || raw.includes('[404') || raw.includes('is not found for API') ||
+      raw.includes('not found for API version')) {
+    return {
+      kind: 'not_found',
+      userMessage: `Model not found (404) — removing from pool for this session. (${raw.slice(0, 120)})`,
+    };
+  }
   // Auth failures — API key missing, invalid, or not enabled for Gemini API
   if (raw.includes('API_KEY_INVALID') || raw.includes('API key not valid') ||
       raw.includes('401') || raw.includes('[401') ||
