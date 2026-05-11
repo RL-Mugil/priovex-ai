@@ -175,7 +175,7 @@ export function classifyError(err: unknown): { kind: ErrorKind; userMessage: str
       raw.toLowerCase().includes('api key')) {
     return {
       kind: 'api_error',
-      userMessage: `Gemini API key invalid or not authorised — check GEMINI_API_KEY in Railway env vars. (${raw.slice(0, 120)})`,
+      userMessage: `Gemini API key invalid or not authorised — check GOOGLE_GEMINI_API_KEY in Railway env vars. (${raw.slice(0, 120)})`,
     };
   }
   if (raw.includes('RESOURCE_EXHAUSTED') || raw.toLowerCase().includes('quota')) {
