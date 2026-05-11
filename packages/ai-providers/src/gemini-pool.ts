@@ -167,6 +167,17 @@ export class GeminiModelPool {
 export function classifyError(err: unknown): { kind: ErrorKind; userMessage: string } {
   const raw = err instanceof Error ? err.message : String(err);
 
+  // Auth failures — API key missing, invalid, or not enabled for Gemini API
+  if (raw.includes('API_KEY_INVALID') || raw.includes('API key not valid') ||
+      raw.includes('401') || raw.includes('[401') ||
+      raw.includes('403') || raw.includes('[403') ||
+      raw.includes('PERMISSION_DENIED') || raw.includes('invalid authentication') ||
+      raw.toLowerCase().includes('api key')) {
+    return {
+      kind: 'api_error',
+      userMessage: `Gemini API key invalid or not authorised — check GEMINI_API_KEY in Railway env vars. (${raw.slice(0, 120)})`,
+    };
+  }
   if (raw.includes('RESOURCE_EXHAUSTED') || raw.toLowerCase().includes('quota')) {
     return {
       kind: 'quota_exceeded',
