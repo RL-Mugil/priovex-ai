@@ -8,6 +8,7 @@ COPY . .
 
 # Install dependencies at root level (this installs all workspace dependencies)
 RUN npm install
+RUN npx prisma generate
 
 # Build the workers package
 WORKDIR /app/apps/workers
@@ -24,6 +25,11 @@ COPY --from=builder /app/apps/workers/package.json ./apps/workers/
 
 # Copy the built output
 COPY --from=builder /app/apps/workers/dist ./apps/workers/dist
+
+# Copy prisma schema and generated client
+COPY --from=builder /app/packages/database/prisma ./packages/database/prisma
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
 # Install production dependencies only
 RUN npm install --omit=dev
