@@ -8,7 +8,7 @@ COPY . .
 
 # Install dependencies at root level (this installs all workspace dependencies)
 RUN npm install
-RUN npx prisma generate
+RUN npx prisma generate --schema=/app/packages/database/prisma/schema.prisma
 
 # Build the workers package
 WORKDIR /app/apps/workers
