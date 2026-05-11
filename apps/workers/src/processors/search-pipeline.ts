@@ -281,19 +281,6 @@ export async function runSearchPipeline(
     let totalBytesProcessed = 0n;
     let bigQueryQuotaHit = false;
 
-    // Matches quota exhaustion, bytes-billed limits, and auth/credentials errors —
-    // all mean BigQuery is unavailable for this run; fall back to EPO OPS immediately.
-    const isBigQueryUnavailable = (msg: string) =>
-      msg.includes('Quota exceeded') ||
-      msg.includes('quota exceeded') ||
-      msg.includes('free query bytes') ||
-      msg.includes('bytes billed') ||
-      msg.includes('bytesBilledLimitExceeded') ||
-      msg.includes('Could not load the default credentials') ||
-      msg.includes('GOOGLE_CLOUD_PROJECT is not set') ||
-      msg.includes('UNAUTHENTICATED') ||
-      msg.includes('default credentials');
-
     const batchSize = 3;
     for (let i = 0; i < Math.min(allKeywords.length, 12); i += batchSize) {
       const batch = allKeywords.slice(i, i + batchSize);
@@ -313,17 +300,9 @@ export async function runSearchPipeline(
         });
       } catch (err) {
         const msg = (err as Error).message;
-        if (isBigQueryUnavailable(msg)) {
-          bigQueryQuotaHit = true;
-          const isAuth = msg.includes('credentials') || msg.includes('UNAUTHENTICATED') || msg.includes('GOOGLE_CLOUD_PROJECT');
-          await log(LogLevel.WARN,
-            isAuth
-              ? `[BigQuery] Credentials not configured (set GOOGLE_SERVICE_ACCOUNT_JSON + GOOGLE_CLOUD_PROJECT in Railway) — switching to EPO OPS database`
-              : `[BigQuery] Quota exceeded — stopping BigQuery batches, switching to EPO OPS database`
-          );
-          break;
-        }
-        await log(LogLevel.WARN, `[BigQuery] Keyword batch failed: ${msg}`);
+        bigQueryQuotaHit = true;
+        await log(LogLevel.WARN, `[BigQuery] Search failed — switching to EPO OPS. Reason: ${msg.slice(0, 120)}`);
+        break;
       }
       await checkCancellation();
     }
@@ -433,12 +412,8 @@ export async function runSearchPipeline(
           });
         } catch (err) {
           const msg = (err as Error).message;
-          if (isBigQueryUnavailable(msg)) {
-            cpcQuotaHit = true;
-            await log(LogLevel.WARN, `[BigQuery] CPC search unavailable — switching to EPO OPS database`);
-          } else {
-            await log(LogLevel.WARN, `[BigQuery] CPC search failed: ${msg}`);
-          }
+          cpcQuotaHit = true;
+          await log(LogLevel.WARN, `[BigQuery] CPC search failed — switching to EPO OPS. Reason: ${msg.slice(0, 120)}`);
         }
       } else {
         await log(LogLevel.INFO, `[BigQuery] Skipping CPC search — BigQuery unavailable (already failed in Step 4), using EPO OPS`);
