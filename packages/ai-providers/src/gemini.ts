@@ -76,7 +76,7 @@ export class GeminiProvider implements AIProvider {
       const tokens = result.response.usageMetadata?.totalTokenCount ?? 0;
       this.totalTokensUsed += tokens;
       return { text, tokens };
-    }, undefined, 'Gemini chat');
+    }, { maxRetries: 4, initialDelayMs: 2000, maxDelayMs: 60_000, backoffFactor: 2 }, 'Gemini chat');
   }
 
   private parseJSON<T>(text: string): T {

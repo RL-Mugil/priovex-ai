@@ -169,8 +169,8 @@ export class OpenAIProvider implements AIProvider {
     const reportPrompt = buildFullReportPrompt(
       input.inventionTitle,
       input.inventionDescription,
-      'Technology',
-      [],
+      input.technicalField,
+      input.keyInnovations,
       topPatentsStr,
       input.reportStyle
     );

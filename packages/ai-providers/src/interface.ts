@@ -130,7 +130,14 @@ export async function withRetry<T>(
 
       // 429 rate-limit: sleep 70s to clear the 1-minute window before retrying
       const msg = lastError.message;
-      const isRateLimit = msg.includes('rate_limit_error') || msg.startsWith('429') || msg.includes('rate limit') || msg.includes('Rate limit');
+      const isRateLimit =
+        msg.includes('rate_limit_error') ||
+        msg.startsWith('429') ||
+        msg.includes('[429') ||               // Google SDK: "[429 Too Many Requests]"
+        msg.includes('Too Many Requests') ||
+        msg.includes('RESOURCE_EXHAUSTED') || // Google Gemini quota exhausted
+        msg.includes('rate limit') ||
+        msg.includes('Rate limit');
       const retryDelay = isRateLimit ? 70_000 : delay;
 
       console.warn(
