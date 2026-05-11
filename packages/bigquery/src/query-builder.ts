@@ -189,7 +189,7 @@ export function buildTimelineQuery(opts: TimelineQueryOptions): string {
 
   return `
     SELECT
-      EXTRACT(YEAR FROM PARSE_DATE('%Y%m%d', filing_date)) AS year,
+      DIV(filing_date, 10000) AS year,
       COUNT(*) AS filing_count,
       ARRAY_AGG(DISTINCT assignee_harmonized[SAFE_OFFSET(0)].name IGNORE NULLS LIMIT 5) AS top_assignees
     FROM \`${PATENTS_TABLE}\`

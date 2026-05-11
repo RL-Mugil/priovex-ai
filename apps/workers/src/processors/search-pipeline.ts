@@ -281,12 +281,14 @@ export async function runSearchPipeline(
     let totalBytesProcessed = 0n;
     let bigQueryQuotaHit = false;
 
-    // Matches both quota exhaustion and auth/credentials errors — both mean BigQuery is
-    // unavailable for this run and we should fall back to EPO OPS immediately.
+    // Matches quota exhaustion, bytes-billed limits, and auth/credentials errors —
+    // all mean BigQuery is unavailable for this run; fall back to EPO OPS immediately.
     const isBigQueryUnavailable = (msg: string) =>
       msg.includes('Quota exceeded') ||
       msg.includes('quota exceeded') ||
       msg.includes('free query bytes') ||
+      msg.includes('bytes billed') ||
+      msg.includes('bytesBilledLimitExceeded') ||
       msg.includes('Could not load the default credentials') ||
       msg.includes('GOOGLE_CLOUD_PROJECT is not set') ||
       msg.includes('UNAUTHENTICATED') ||
