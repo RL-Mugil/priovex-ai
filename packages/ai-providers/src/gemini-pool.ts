@@ -1,18 +1,16 @@
 // Gemini model pool — automatic failover across all available free-tier models
 //
-// API IDs are best-effort based on Google AI naming conventions.
 // If any model ID fails with "model not found", update it here or in env:
-//   GEMINI_POOL_OVERRIDES (JSON array — see README)
+//   GEMINI_POOL_OVERRIDES (JSON array) e.g.:
+//   [{"id":"gemma-4-27b-it","displayName":"Gemma 4 27B","tier":"fallback","rpm":15,"tpmK":null}]
 //
 // Free-tier quota snapshot (Google AI Studio — update as your limits change):
-//   gemini-2.5-flash       5 RPM  250K TPM  20 RPD   ← quality reasoning
-//   gemini-3.0-flash       5 RPM  250K TPM  20 RPD   ← quality reasoning
-//   gemini-3.1-flash-lite  15 RPM 250K TPM  500 RPD  ← high-volume tasks
-//   gemini-2.5-flash-lite  10 RPM 250K TPM  20 RPD   ← medium tasks
-//   gemma-4-26b            15 RPM unlimited   1.5K RPD ← large-prompt fallback
-//   gemma-4-31b            15 RPM unlimited   1.5K RPD ← large-prompt fallback
-//   gemma-3-27b-it         30 RPM 15K TPM    14.4K RPD ← short-prompt only
-//   gemma-3-12b-it         30 RPM 15K TPM    14.4K RPD ← short-prompt only
+//   gemini-2.5-flash       5 RPM  250K TPM  500 RPD  ← quality reasoning
+//   gemini-2.0-flash       15 RPM 1M TPM    1.5K RPD ← standard volume (confirmed working)
+//   gemini-1.5-flash       15 RPM 1M TPM    1.5K RPD ← standard fallback
+//   gemini-1.5-flash-8b    15 RPM 1M TPM    1.5K RPD ← micro tasks
+//   gemma-3-27b-it         30 RPM 15K TPM   14.4K RPD ← large-prompt open model
+//   gemma-3-12b-it         30 RPM 15K TPM   14.4K RPD ← medium open model
 
 export type ModelTier = 'quality' | 'standard' | 'fallback' | 'micro';
 export type ErrorKind = 'rate_limit' | 'quota_exceeded' | 'api_error' | 'json_parse' | 'unknown';
@@ -26,17 +24,15 @@ export interface PooledModel {
   maxInputChars?:  number;    // skip model if prompt exceeds this (Gemma 3: ~30K chars ≈ 7.5K tokens)
 }
 
-// Central catalog — all Gemini/Gemma models with non-zero free quota
+// Central catalog — confirmed Google AI free-tier model IDs (verified against API)
 // Ordered: quality-first, fallback last
 const DEFAULT_POOL: PooledModel[] = [
-  { id: 'gemini-2.5-flash',       displayName: 'Gemini 2.5 Flash',       rpm: 5,  tpmK: 250,      tier: 'quality'  },
-  { id: 'gemini-3.0-flash',       displayName: 'Gemini 3 Flash',         rpm: 5,  tpmK: 250,      tier: 'quality'  },
-  { id: 'gemini-3.1-flash-lite',  displayName: 'Gemini 3.1 Flash Lite',  rpm: 15, tpmK: 250,      tier: 'standard' },
-  { id: 'gemini-2.5-flash-lite',  displayName: 'Gemini 2.5 Flash Lite',  rpm: 10, tpmK: 250,      tier: 'standard' },
-  { id: 'gemma-4-26b',            displayName: 'Gemma 4 26B',            rpm: 15, tpmK: Infinity, tier: 'fallback' },
-  { id: 'gemma-4-31b',            displayName: 'Gemma 4 31B',            rpm: 15, tpmK: Infinity, tier: 'fallback' },
-  { id: 'gemma-3-27b-it',         displayName: 'Gemma 3 27B',            rpm: 30, tpmK: 15,       tier: 'micro',   maxInputChars: 28_000 },
-  { id: 'gemma-3-12b-it',         displayName: 'Gemma 3 12B',            rpm: 30, tpmK: 15,       tier: 'micro',   maxInputChars: 28_000 },
+  { id: 'gemini-2.5-flash',    displayName: 'Gemini 2.5 Flash',    rpm: 5,  tpmK: 250,  tier: 'quality'  },
+  { id: 'gemini-2.0-flash',    displayName: 'Gemini 2.0 Flash',    rpm: 15, tpmK: 1000, tier: 'standard' },
+  { id: 'gemini-1.5-flash',    displayName: 'Gemini 1.5 Flash',    rpm: 15, tpmK: 1000, tier: 'standard' },
+  { id: 'gemini-1.5-flash-8b', displayName: 'Gemini 1.5 Flash 8B', rpm: 15, tpmK: 1000, tier: 'fallback' },
+  { id: 'gemma-3-27b-it',      displayName: 'Gemma 3 27B',         rpm: 30, tpmK: 15,   tier: 'micro',   maxInputChars: 28_000 },
+  { id: 'gemma-3-12b-it',      displayName: 'Gemma 3 12B',         rpm: 30, tpmK: 15,   tier: 'micro',   maxInputChars: 28_000 },
 ];
 
 // Tier ordering for fallback priority

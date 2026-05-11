@@ -19,7 +19,16 @@ const FOOTER = `<div style="font-size:8px;font-family:Arial;color:#9ca3af;width:
 
 async function htmlToPDF(html: string): Promise<Buffer> {
   const puppeteer = await import('puppeteer');
-  const browser = await puppeteer.default.launch({ headless: true, args: PDF_ARGS });
+  // In Alpine Docker (Railway), use the system Chromium installed via apk.
+  // Locally, fall back to the Puppeteer-managed binary.
+  const executablePath =
+    process.env.PUPPETEER_EXECUTABLE_PATH ??
+    (process.env.RAILWAY_ENVIRONMENT ? '/usr/bin/chromium-browser' : undefined);
+  const browser = await puppeteer.default.launch({
+    headless: true,
+    args: PDF_ARGS,
+    ...(executablePath ? { executablePath } : {}),
+  });
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });

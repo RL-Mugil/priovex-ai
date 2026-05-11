@@ -281,8 +281,16 @@ export async function runSearchPipeline(
     let totalBytesProcessed = 0n;
     let bigQueryQuotaHit = false;
 
-    const isQuotaError = (msg: string) =>
-      msg.includes('Quota exceeded') || msg.includes('quota exceeded') || msg.includes('free query bytes');
+    // Matches both quota exhaustion and auth/credentials errors — both mean BigQuery is
+    // unavailable for this run and we should fall back to EPO OPS immediately.
+    const isBigQueryUnavailable = (msg: string) =>
+      msg.includes('Quota exceeded') ||
+      msg.includes('quota exceeded') ||
+      msg.includes('free query bytes') ||
+      msg.includes('Could not load the default credentials') ||
+      msg.includes('GOOGLE_CLOUD_PROJECT is not set') ||
+      msg.includes('UNAUTHENTICATED') ||
+      msg.includes('default credentials');
 
     const batchSize = 3;
     for (let i = 0; i < Math.min(allKeywords.length, 12); i += batchSize) {
@@ -303,9 +311,14 @@ export async function runSearchPipeline(
         });
       } catch (err) {
         const msg = (err as Error).message;
-        if (isQuotaError(msg)) {
+        if (isBigQueryUnavailable(msg)) {
           bigQueryQuotaHit = true;
-          await log(LogLevel.WARN, `[BigQuery] Quota exceeded — stopping BigQuery batches, switching to EPO OPS database`);
+          const isAuth = msg.includes('credentials') || msg.includes('UNAUTHENTICATED') || msg.includes('GOOGLE_CLOUD_PROJECT');
+          await log(LogLevel.WARN,
+            isAuth
+              ? `[BigQuery] Credentials not configured (set GOOGLE_SERVICE_ACCOUNT_JSON + GOOGLE_CLOUD_PROJECT in Railway) — switching to EPO OPS database`
+              : `[BigQuery] Quota exceeded — stopping BigQuery batches, switching to EPO OPS database`
+          );
           break;
         }
         await log(LogLevel.WARN, `[BigQuery] Keyword batch failed: ${msg}`);
@@ -398,31 +411,35 @@ export async function runSearchPipeline(
     let cpcResults: RawPatent[] = [];
 
     if (input.depth !== 'quick') {
-      let cpcQuotaHit = false;
+      let cpcQuotaHit = bigQueryQuotaHit; // skip BigQuery CPC if BQ already failed in Step 4
 
-      // Try BigQuery CPC search first
-      try {
-        const result = await searchByCPCCodes(topCPCs, input.jurisdictions, 150);
-        cpcResults = result.patents;
-        totalBytesProcessed += result.bytesProcessed;
-        const usCount  = result.patents.filter(p => p.countryCode === 'US').length;
-        const epCount  = result.patents.filter(p => p.countryCode === 'EP').length;
-        const woCount  = result.patents.filter(p => p.countryCode === 'WO').length;
-        await log(LogLevel.SUCCESS, `[BigQuery] CPC search: ${result.patents.length} patents (US: ${usCount}, EP: ${epCount}, WO: ${woCount})`, {
-          type: 'CPC_SEARCH',
-          source: 'bigquery',
-          found: result.patents.length,
-          breakdown: { US: usCount, EP: epCount, WO: woCount },
-          cpcCodes: topCPCs.slice(0, 5),
-        });
-      } catch (err) {
-        const msg = (err as Error).message;
-        if (msg.includes('Quota exceeded') || msg.includes('quota exceeded') || msg.includes('free query bytes')) {
-          cpcQuotaHit = true;
-          await log(LogLevel.WARN, `[BigQuery] Quota exceeded on CPC search — switching to EPO OPS database`);
-        } else {
-          await log(LogLevel.WARN, `[BigQuery] CPC search failed: ${msg}`);
+      if (!cpcQuotaHit) {
+        // Try BigQuery CPC search first
+        try {
+          const result = await searchByCPCCodes(topCPCs, input.jurisdictions, 150);
+          cpcResults = result.patents;
+          totalBytesProcessed += result.bytesProcessed;
+          const usCount  = result.patents.filter(p => p.countryCode === 'US').length;
+          const epCount  = result.patents.filter(p => p.countryCode === 'EP').length;
+          const woCount  = result.patents.filter(p => p.countryCode === 'WO').length;
+          await log(LogLevel.SUCCESS, `[BigQuery] CPC search: ${result.patents.length} patents (US: ${usCount}, EP: ${epCount}, WO: ${woCount})`, {
+            type: 'CPC_SEARCH',
+            source: 'bigquery',
+            found: result.patents.length,
+            breakdown: { US: usCount, EP: epCount, WO: woCount },
+            cpcCodes: topCPCs.slice(0, 5),
+          });
+        } catch (err) {
+          const msg = (err as Error).message;
+          if (isBigQueryUnavailable(msg)) {
+            cpcQuotaHit = true;
+            await log(LogLevel.WARN, `[BigQuery] CPC search unavailable — switching to EPO OPS database`);
+          } else {
+            await log(LogLevel.WARN, `[BigQuery] CPC search failed: ${msg}`);
+          }
         }
+      } else {
+        await log(LogLevel.INFO, `[BigQuery] Skipping CPC search — BigQuery unavailable (already failed in Step 4), using EPO OPS`);
       }
 
       // EPO OPS fallback for CPC search

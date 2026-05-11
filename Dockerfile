@@ -19,8 +19,8 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-# Install OpenSSL for Prisma compatibility with Alpine Linux
-RUN apk add --no-cache openssl
+# Install OpenSSL (Prisma) and Chromium (Puppeteer PDF generation)
+RUN apk add --no-cache openssl chromium chromium-chromedriver nss freetype harfbuzz ca-certificates ttf-freefont
 
 # Copy package.json files from root and apps/workers
 COPY --from=builder /app/package.json /app/package-lock.json ./
