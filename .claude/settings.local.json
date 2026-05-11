@@ -14,7 +14,18 @@
       "PowerShell(choco install *)",
       "PowerShell($env:PATH = $env:PATH + \";C:\\\\Program Files\\\\Docker\\\\Docker\\\\resources\\\\bin;C:\\\\ProgramData\\\\DockerDesktop\\\\version-bin\"; docker --version)",
       "PowerShell(Get-Process *)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "mcp__claude_ai_Vercel__list_deployments",
+      "mcp__claude_ai_Vercel__get_deployment_build_logs",
+      "mcp__plugin_supabase_supabase__list_tables",
+      "Bash(npx tsc *)",
+      "mcp__plugin_supabase_supabase__apply_migration",
+      "Bash(npm install *)",
+      "Bash(npx prisma *)",
+      "Bash(npm run *)",
+      "Bash(dir \"C:\\\\Users\\\\mugil\\\\OneDrive\\\\Desktop\\\\CLAUDE.AI\\\\PROJECTS\\\\priovex-ai\\\\apps\\\\workers\\\\dist\")",
+      "Bash(git add *)",
+      "Bash(git push *)"
     ]
   }
 }
