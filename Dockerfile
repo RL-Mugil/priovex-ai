@@ -19,6 +19,9 @@ FROM node:22-alpine
 
 WORKDIR /app
 
+# Install OpenSSL for Prisma compatibility with Alpine Linux
+RUN apk add --no-cache openssl
+
 # Copy package.json files from root and apps/workers
 COPY --from=builder /app/package.json /app/package-lock.json ./
 COPY --from=builder /app/apps/workers/package.json ./apps/workers/
