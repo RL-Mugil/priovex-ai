@@ -1,3 +1,5 @@
+const { withSentryConfig } = require('@sentry/nextjs');
+
 /** @type {import('next').NextConfig} */
 process.env.NEXT_TELEMETRY_DISABLED = '1';
 
@@ -41,4 +43,13 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+module.exports = withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG ?? 'metayage-private-limited',
+  project: process.env.SENTRY_PROJECT ?? 'priovex-ai',
+  silent: true,
+  widenClientFileUpload: true,
+  tunnelRoute: '/monitoring',
+  hideSourceMaps: true,
+  disableLogger: true,
+  automaticVercelMonitors: true,
+});
