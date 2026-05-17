@@ -72,9 +72,9 @@ export function generateMarkdownReport(report: PatentReport): string {
     ``,
     `---`,
     ``,
-    `## Top 10 Most Relevant Prior Art`,
+    `## Top 5 Most Relevant Prior Art`,
     ``,
-    ...report.topPriorArt.slice(0, 10).flatMap((patent, i) => [
+    ...report.topPriorArt.slice(0, 5).flatMap((patent, i) => [
       `### ${i + 1}. ${patent.publicationNumber} — ${patent.title}`,
       ``,
       `**Relevance Score:** ${patent.relevanceScore}% | **Similarity:** ${patent.similarityScore}% | **Impact:** ${patent.noveltyImpact.toUpperCase()}  `,
@@ -119,10 +119,6 @@ export function generateMarkdownReport(report: PatentReport): string {
     `### Elements to Emphasize`,
     ``,
     ...cs.elementsToEmphasize.map((e) => `- ✅ ${e}`),
-    ``,
-    `### Elements to Avoid Claiming Broadly`,
-    ``,
-    ...cs.elementsToAvoid.map((e) => `- ⚠️ ${e}`),
     ``,
     `---`,
     ``,
@@ -247,6 +243,31 @@ export function generateMarkdownReport(report: PatentReport): string {
       `---`,
       ``,
     ] : []),
+
+    // ── Client Summary ─────────────────────────────────────────────────────
+    ...(report.clientSummary ? (() => {
+      const cs2 = report.clientSummary!;
+      const verdictIcon = cs2.isPatentable ? '✅' : '❌';
+      const confidenceLabel = cs2.confidence === 'high' ? 'High Confidence' : cs2.confidence === 'medium' ? 'Medium Confidence' : 'Low Confidence';
+      return [
+        `## Summary for You (Plain Language)`,
+        ``,
+        `> This section is written for you as the inventor — no legal jargon.`,
+        ``,
+        `### ${verdictIcon} ${cs2.plainVerdict}`,
+        ``,
+        `**Confidence:** ${confidenceLabel}`,
+        ``,
+        cs2.reason,
+        ``,
+        `**Main Risk:** ${cs2.mainRisk}`,
+        ``,
+        `**What to do next:** ${cs2.nextStep}`,
+        ``,
+        `---`,
+        ``,
+      ];
+    })() : []),
 
     // ── Legal Disclaimer ───────────────────────────────────────────────────
     `## Legal Disclaimer`,

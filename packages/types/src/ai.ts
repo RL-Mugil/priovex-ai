@@ -1,5 +1,5 @@
 import type { ScoredPatent, NPLReference, NovelElement, CoverageMatrix, IDSEntry, ExaminerPrediction, GapGroundedClaimDraft } from './patent';
-import type { PatentabilityAssessment, ClaimStrategy, SearchStatistics } from './report';
+import type { PatentabilityAssessment, ClaimStrategy, ClientSummary, SearchStatistics } from './report';
 import type { ConceptExtraction, KeywordStrategy, ReportStyle, SearchType } from './search';
 
 export interface AIAnalysisInput {
@@ -19,6 +19,7 @@ export interface AIAnalysisOutput {
   scoredPatents: ScoredPatent[];
   patentabilityAssessment: PatentabilityAssessment;
   claimStrategy: ClaimStrategy;
+  clientSummary?: ClientSummary;
   tokensUsed: number;
   costUsd: number;
   model: string;

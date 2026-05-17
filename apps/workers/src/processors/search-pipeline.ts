@@ -708,7 +708,7 @@ export async function runSearchPipeline(
 
     // Analyze top NPL references sequentially — parallel calls hit 5 RPM limit
     let analyzedNPL = nplReferences;
-    const topNPL = nplReferences.slice(0, 6); // max 6 to stay within time budget
+    const topNPL = nplReferences.slice(0, 3); // max 3 to stay within time and cost budget
 
     if (topNPL.length > 0) {
       const nplScored: NPLReference[] = [];
@@ -738,7 +738,7 @@ export async function runSearchPipeline(
         }
       }
 
-      analyzedNPL = [...nplScored, ...nplReferences.slice(6)];
+      analyzedNPL = [...nplScored, ...nplReferences.slice(3)];
       await log(LogLevel.SUCCESS, `NPL analysis complete: ${nplScored.length} references scored`);
     }
 
@@ -948,8 +948,8 @@ export async function runSearchPipeline(
           technicalField: input.technicalField,
           novelElements,
           coverageMatrix,
-          topPatents: aiOutput.scoredPatents.slice(0, 10),
-          nplReferences: analyzedNPL.slice(0, 5),
+          topPatents: aiOutput.scoredPatents.slice(0, 5),
+          nplReferences: analyzedNPL.slice(0, 3),
         });
         await log(LogLevel.SUCCESS, `Gap-grounded claims: ${gapClaimDraft.independentClaims.length} independent, ${gapClaimDraft.dependentClaims.length} dependent`);
       } catch (err) {
@@ -980,6 +980,7 @@ export async function runSearchPipeline(
       executiveSummary: aiOutput.executiveSummary,
       patentabilityAssessment: aiOutput.patentabilityAssessment,
       claimStrategy: aiOutput.claimStrategy,
+      clientSummary: aiOutput.clientSummary,
 
       // v2 intelligence layers
       novelElements,

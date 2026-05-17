@@ -175,7 +175,7 @@ export class ClaudeProvider implements AIProvider {
     const prompt = buildConceptExtractionPrompt(
       inventionTitle, inventionDescription, technicalField, keyInnovations
     );
-    const { text } = await this.chat(prompt);
+    const { text } = await this.chat(prompt, MAX_TOKENS, true);
     return this.parseJSON<ConceptExtraction>(text);
   }
 
@@ -208,7 +208,7 @@ export class ClaudeProvider implements AIProvider {
   ): Promise<KeywordStrategy> {
     const conceptsStr = JSON.stringify(concepts, null, 2);
     const prompt = buildKeywordStrategyPrompt(conceptsStr, technicalField);
-    const { text } = await this.chat(prompt);
+    const { text } = await this.chat(prompt, MAX_TOKENS, true);
     return this.parseJSON<KeywordStrategy>(text);
   }
 
@@ -223,7 +223,7 @@ export class ClaudeProvider implements AIProvider {
       input.patent.abstract,
       input.patent.claims
     );
-    const { text } = await this.chat(prompt);
+    const { text } = await this.chat(prompt, MAX_TOKENS, true);
     return this.parseJSON<ComparisonOutput>(text);
   }
 
@@ -446,8 +446,8 @@ export class ClaudeProvider implements AIProvider {
   async generateFullReport(input: AIAnalysisInput): Promise<AIAnalysisOutput> {
     const scoredPatents: ScoredPatent[] = [];
 
-    // Score top 8 candidate patents sequentially — 5 RPM org limit
-    const candidates = input.candidatePatents.slice(0, 8);
+    // Score top 5 candidate patents sequentially — 5 RPM org limit
+    const candidates = input.candidatePatents.slice(0, 5);
 
     for (let i = 0; i < candidates.length; i++) {
       const p = candidates[i];
@@ -473,7 +473,7 @@ export class ClaudeProvider implements AIProvider {
     scoredPatents.sort((a, b) => b.similarityScore - a.similarityScore);
     scoredPatents.forEach((p, idx) => { p.rank = idx + 1; });
 
-    const topPatentsStr = scoredPatents.slice(0, 10).map((p, i) =>
+    const topPatentsStr = scoredPatents.slice(0, 5).map((p, i) =>
       `${i + 1}. ${p.publicationNumber} — "${p.title}" (Similarity: ${p.similarityScore}%)\n` +
       `   Assignee: ${p.assignees[0] ?? 'N/A'} | Filed: ${p.filingDate}\n` +
       `   Impact: ${p.noveltyImpact} | Key similarity: ${p.similarities[0] ?? 'N/A'}`
@@ -496,6 +496,7 @@ export class ClaudeProvider implements AIProvider {
       executiveSummary: string;
       patentabilityAssessment: AIAnalysisOutput['patentabilityAssessment'];
       claimStrategy: AIAnalysisOutput['claimStrategy'];
+      clientSummary?: AIAnalysisOutput['clientSummary'];
     }>(text);
 
     return {
@@ -503,6 +504,7 @@ export class ClaudeProvider implements AIProvider {
       scoredPatents,
       patentabilityAssessment: reportData.patentabilityAssessment,
       claimStrategy: reportData.claimStrategy,
+      clientSummary: reportData.clientSummary,
       tokensUsed: this.totalTokensUsed,
       costUsd: this.estimatedCostUsd,
       model: CLAUDE_MODEL,
@@ -517,7 +519,7 @@ export class ClaudeProvider implements AIProvider {
 
 function buildNPLSummary(nplRefs: NPLReference[]): string {
   if (nplRefs.length === 0) return '';
-  return nplRefs.slice(0, 5).map((r, i) =>
+  return nplRefs.slice(0, 3).map((r, i) =>
     `NPL ${i + 1}: "${r.title}" (${r.source}, score: ${r.relevanceScore}) — ${r.abstract.slice(0, 150)}...`
   ).join('\n');
 }

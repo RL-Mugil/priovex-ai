@@ -588,14 +588,22 @@ Return a JSON object:
     "dependentClaimSuggestions": ["claim dep 1 — targeting uncovered element", "claim dep 2"],
     "claimingApproach": "description of approach based on coverage gaps",
     "elementsToEmphasize": ["element1", "element2"],
-    "elementsToAvoid": ["avoid1 — covered by US12345"],
     "prosecutionStrategy": "prosecution strategy description"
+  },
+  "clientSummary": {
+    "isPatentable": true,
+    "confidence": "high",
+    "plainVerdict": "Yes, your invention appears patentable.",
+    "reason": "2-3 sentences in plain English explaining why the invention is or is not patentable — no legal jargon. E.g. 'We searched over 100 million patents and found no existing patent that describes your specific combination of [X] and [Y]. The key parts of your invention that make it unique are [Z].' OR 'We found a patent filed in 2019 that already describes the core idea of your invention. Because that patent publicly disclosed this approach before your filing date, a patent on the same concept would likely be rejected.'",
+    "mainRisk": "The single biggest risk in plain language a non-expert can understand.",
+    "nextStep": "A clear, actionable next step — e.g. 'We recommend filing a provisional patent application to secure your priority date while you finalize the design.' or 'Before proceeding, consider revising the invention to focus on [specific uncovered element] which is not found in existing patents.'"
   }
 }
 
 Verdict options: PROCEED | PROCEED_WITH_CAUTION | REFINE_FIRST | UNLIKELY
 Rating options: HIGH | MEDIUM-HIGH | MEDIUM | MEDIUM-LOW | LOW
-Claim scope: broad | moderate | narrow`;
+Claim scope: broad | moderate | narrow
+clientSummary.confidence: high | medium | low`;
 }
 
 // =============================================================================

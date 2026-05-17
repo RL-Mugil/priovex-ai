@@ -1,11 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Plus, X, ChevronRight, ChevronLeft, Loader2, AlertCircle } from 'lucide-react';
+import { Plus, X, ChevronRight, ChevronLeft, Loader2, AlertCircle, FileUp } from 'lucide-react';
 
 const schema = z.object({
   title: z.string().min(5, 'At least 5 characters').max(200),
@@ -37,6 +37,9 @@ export function NewSearchForm({ remainingSearches }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [innovationInput, setInnovationInput] = useState('');
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const form = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -66,6 +69,33 @@ export function NewSearchForm({ remainingSearches }: Props) {
 
   function removeInnovation(idx: number) {
     setValue('keyInnovations', innovations.filter((_, i) => i !== idx), { shouldValidate: true });
+  }
+
+  async function handlePdfUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPdfError('');
+    setPdfLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/extract-pdf', { method: 'POST', body: fd });
+      const data = await res.json() as {
+        title?: string; technicalField?: string; description?: string;
+        problemSolved?: string; keyInnovations?: string[]; error?: string;
+      };
+      if (!res.ok) throw new Error(data.error ?? 'Extraction failed');
+      if (data.title) setValue('title', data.title, { shouldValidate: true });
+      if (data.technicalField) setValue('technicalField', data.technicalField, { shouldValidate: true });
+      if (data.description) setValue('description', data.description, { shouldValidate: true });
+      if (data.problemSolved) setValue('problemSolved', data.problemSolved, { shouldValidate: true });
+      if (data.keyInnovations?.length) setValue('keyInnovations', data.keyInnovations, { shouldValidate: true });
+    } catch (err) {
+      setPdfError((err as Error).message);
+    } finally {
+      setPdfLoading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   }
 
   async function goNext() {
@@ -153,6 +183,38 @@ export function NewSearchForm({ remainingSearches }: Props) {
         {/* Step 1 */}
         {step === 1 && (
           <div className="space-y-4">
+            {/* PDF Upload */}
+            <div className="border border-dashed border-slate-200 rounded-xl p-4 bg-slate-50 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-slate-700">Have an invention disclosure or patent draft?</p>
+                <p className="text-xs text-slate-400 mt-0.5">Upload a PDF and we'll auto-fill the fields below.</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {pdfLoading && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf"
+                  className="hidden"
+                  onChange={handlePdfUpload}
+                />
+                <button
+                  type="button"
+                  disabled={pdfLoading}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-1.5 bg-white border border-slate-200 hover:border-blue-400 hover:text-blue-600 text-slate-600 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                >
+                  <FileUp className="w-4 h-4" />
+                  {pdfLoading ? 'Extracting…' : 'Upload PDF'}
+                </button>
+              </div>
+            </div>
+            {pdfError && (
+              <div className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {pdfError}
+              </div>
+            )}
+
             <Field label="Invention Title *" error={errors.title?.message}>
               <input
                 {...form.register('title')}

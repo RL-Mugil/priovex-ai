@@ -34,8 +34,17 @@ export interface ClaimStrategy {
   dependentClaimSuggestions: string[];
   claimingApproach: string;
   elementsToEmphasize: string[];
-  elementsToAvoid: string[];
+  elementsToAvoid?: string[];
   prosecutionStrategy: string;
+}
+
+export interface ClientSummary {
+  isPatentable: boolean;
+  confidence: 'high' | 'medium' | 'low';
+  plainVerdict: string;
+  reason: string;
+  mainRisk: string;
+  nextStep: string;
 }
 
 export interface SearchStatistics {
@@ -73,6 +82,7 @@ export interface PatentReport {
   executiveSummary: string;
   patentabilityAssessment: PatentabilityAssessment;
   claimStrategy: ClaimStrategy;
+  clientSummary?: ClientSummary;
 
   // v2 — Intelligence layers
   novelElements: NovelElement[];
