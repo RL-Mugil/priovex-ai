@@ -31,7 +31,9 @@ export async function POST(req: NextRequest) {
   let rawText: string;
   try {
     const buffer = Buffer.from(await file.arrayBuffer());
-    const pdfParse = (await import('pdf-parse')).default;
+    // pdf-parse ships both CJS and ESM; the callable may sit on .default or on the module itself
+    const pdfParseModule = (await import('pdf-parse')) as any;
+    const pdfParse: (buf: Buffer) => Promise<{ text: string }> = pdfParseModule.default ?? pdfParseModule;
     const parsed = await pdfParse(buffer);
     rawText = parsed.text?.trim() ?? '';
   } catch (err) {
