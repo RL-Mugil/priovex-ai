@@ -27,15 +27,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'File too large — maximum 10 MB' }, { status: 400 });
   }
 
-  // Extract raw text from PDF
+  // Extract raw text from PDF using pdf-parse v2 class-based API
   let rawText: string;
   try {
+    const { PDFParse } = await import('pdf-parse');
     const buffer = Buffer.from(await file.arrayBuffer());
-    // pdf-parse ships both CJS and ESM; the callable may sit on .default or on the module itself
-    const pdfParseModule = (await import('pdf-parse')) as any;
-    const pdfParse: (buf: Buffer) => Promise<{ text: string }> = pdfParseModule.default ?? pdfParseModule;
-    const parsed = await pdfParse(buffer);
-    rawText = parsed.text?.trim() ?? '';
+    const parser = new PDFParse({ data: buffer });
+    const result = await parser.getText();
+    rawText = result.text?.trim() ?? '';
   } catch (err) {
     console.error('[extract-pdf] pdf-parse error:', err);
     return NextResponse.json({ error: 'Could not read PDF — ensure it is not password-protected or scanned-only' }, { status: 422 });
