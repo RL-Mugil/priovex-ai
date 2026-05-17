@@ -187,7 +187,7 @@ export function NewSearchForm({ remainingSearches }: Props) {
             <div className="border border-dashed border-slate-200 rounded-xl p-4 bg-slate-50 flex items-center justify-between gap-4">
               <div>
                 <p className="text-sm font-medium text-slate-700">Have an invention disclosure or patent draft?</p>
-                <p className="text-xs text-slate-400 mt-0.5">Upload a PDF and we'll auto-fill the fields below.</p>
+                <p className="text-xs text-slate-400 mt-0.5">Upload a PDF and we&apos;ll auto-fill the fields below.</p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {pdfLoading && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
