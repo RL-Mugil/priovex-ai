@@ -1,11 +1,28 @@
-import { createClient } from '@supabase/supabase-js';
+import {
+  BlobServiceClient,
+  StorageSharedKeyCredential,
+  generateBlobSASQueryParameters,
+  BlobSASPermissions,
+} from '@azure/storage-blob';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+const CONTAINER = process.env.AZURE_STORAGE_CONTAINER ?? 'priovex-reports';
 
-const BUCKET = process.env.SUPABASE_STORAGE_BUCKET ?? 'priovex-reports';
+function getCredential(): StorageSharedKeyCredential {
+  const account = process.env.AZURE_STORAGE_ACCOUNT;
+  const key = process.env.AZURE_STORAGE_KEY;
+  if (!account || !key) throw new Error('AZURE_STORAGE_ACCOUNT and AZURE_STORAGE_KEY are required');
+  return new StorageSharedKeyCredential(account, key);
+}
+
+function getBlobServiceClient(): BlobServiceClient {
+  const connStr = process.env.AZURE_STORAGE_CONNECTION_STRING;
+  if (connStr) return BlobServiceClient.fromConnectionString(connStr);
+  const cred = getCredential();
+  return new BlobServiceClient(
+    `https://${process.env.AZURE_STORAGE_ACCOUNT}.blob.core.windows.net`,
+    cred
+  );
+}
 
 export async function uploadReport(
   searchId: string,
@@ -13,38 +30,45 @@ export async function uploadReport(
   content: Buffer,
   contentType: string
 ): Promise<string> {
-  const path = `reports/${searchId}/${filename}`;
+  const blobName = `reports/${searchId}/${filename}`;
+  const blockBlobClient = getBlobServiceClient()
+    .getContainerClient(CONTAINER)
+    .getBlockBlobClient(blobName);
 
-  const { error } = await supabase.storage.from(BUCKET).upload(path, content, {
-    contentType,
-    upsert: true,
+  await blockBlobClient.upload(content, content.length, {
+    blobHTTPHeaders: { blobContentType: contentType },
   });
 
-  if (error) throw new Error(`Storage upload failed: ${error.message}`);
-
-  const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);
-  return data.publicUrl;
+  // Container must have blob-level public access for this URL to be directly accessible
+  return blockBlobClient.url;
 }
 
 export async function getSignedUrl(
   path: string,
   expiresInSeconds = 3600
 ): Promise<string> {
-  const { data, error } = await supabase.storage
-    .from(BUCKET)
-    .createSignedUrl(path, expiresInSeconds);
+  const credential = getCredential();
+  const blockBlobClient = getBlobServiceClient()
+    .getContainerClient(CONTAINER)
+    .getBlockBlobClient(path);
 
-  if (error || !data) throw new Error(`Failed to generate signed URL: ${error?.message}`);
-  return data.signedUrl;
+  const sas = generateBlobSASQueryParameters(
+    {
+      containerName: CONTAINER,
+      blobName: path,
+      permissions: BlobSASPermissions.parse('r'),
+      expiresOn: new Date(Date.now() + expiresInSeconds * 1000),
+    },
+    credential
+  ).toString();
+
+  return `${blockBlobClient.url}?${sas}`;
 }
 
 export async function deleteReport(searchId: string): Promise<void> {
-  const { data: files } = await supabase.storage
-    .from(BUCKET)
-    .list(`reports/${searchId}`);
-
-  if (files?.length) {
-    const paths = files.map((f) => `reports/${searchId}/${f.name}`);
-    await supabase.storage.from(BUCKET).remove(paths);
+  const containerClient = getBlobServiceClient().getContainerClient(CONTAINER);
+  const prefix = `reports/${searchId}/`;
+  for await (const blob of containerClient.listBlobsFlat({ prefix })) {
+    await containerClient.deleteBlob(blob.name);
   }
 }

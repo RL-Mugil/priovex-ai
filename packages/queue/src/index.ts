@@ -20,6 +20,8 @@ export function getRedisConnection(): IORedis {
     maxRetriesPerRequest: null,  // Required by BullMQ
     enableReadyCheck: false,
     lazyConnect: true,
+    // Azure Cache for Redis uses rediss:// (TLS on port 6380)
+    ...(url.startsWith('rediss://') && { tls: {} }),
   });
 
   _redis.on('error', (err) => {
@@ -30,10 +32,13 @@ export function getRedisConnection(): IORedis {
 }
 
 export function getConnectionOptions(): ConnectionOptions {
+  const url = process.env.REDIS_URL ?? 'redis://localhost:6379';
+  const parsed = new URL(url);
   return {
-    host: new URL(process.env.REDIS_URL ?? 'redis://localhost:6379').hostname,
-    port: parseInt(new URL(process.env.REDIS_URL ?? 'redis://localhost:6379').port || '6379'),
-    password: new URL(process.env.REDIS_URL ?? 'redis://localhost:6379').password || undefined,
+    host: parsed.hostname,
+    port: parseInt(parsed.port || '6379'),
+    password: parsed.password || undefined,
+    ...(url.startsWith('rediss://') && { tls: {} }),
   };
 }
 

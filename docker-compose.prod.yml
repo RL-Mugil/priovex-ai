@@ -1,0 +1,85 @@
+# Production Docker Compose — Azure VM
+#
+# Images are built by CI and pushed to Azure Container Registry.
+# This file only pulls and runs them — no build steps here.
+#
+# Required env vars for image resolution (set in /opt/priovex/.env on the VM):
+#   ACR_LOGIN_SERVER=priovex.azurecr.io
+#   IMAGE_TAG=<commit-sha>  (CI sets this; defaults to 'latest' for manual runs)
+#
+# Run:    docker compose -f docker-compose.prod.yml up -d
+# Update: CI SSHes in and runs the deploy script automatically
+
+services:
+  web:
+    image: ${ACR_LOGIN_SERVER}/priovex-web:${IMAGE_TAG:-latest}
+    container_name: priovex-web
+    restart: unless-stopped
+    expose:
+      - '3000'
+    env_file: .env.prod
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    networks:
+      - priovex
+    mem_limit: 512m
+
+  workers:
+    image: ${ACR_LOGIN_SERVER}/priovex-workers:${IMAGE_TAG:-latest}
+    container_name: priovex-workers
+    restart: unless-stopped
+    env_file: .env.prod
+    environment:
+      NODE_ENV: production
+    networks:
+      - priovex
+    mem_limit: 512m
+
+  # GlitchTip — self-hosted Sentry-compatible error tracking
+  # Shares Azure PostgreSQL (separate 'glitchtip' database) and Azure Cache for Redis
+  glitchtip-web:
+    image: glitchtip/glitchtip
+    container_name: glitchtip-web
+    restart: unless-stopped
+    expose:
+      - '8000'
+    env_file: .env.glitchtip
+    depends_on:
+      - glitchtip-worker
+    networks:
+      - priovex
+    mem_limit: 256m
+
+  glitchtip-worker:
+    image: glitchtip/glitchtip
+    container_name: glitchtip-worker
+    restart: unless-stopped
+    command: ./bin/run-celery-with-beat.sh
+    env_file: .env.glitchtip
+    networks:
+      - priovex
+    mem_limit: 256m
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: priovex-nginx
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - ./nginx/certbot/www:/var/www/certbot:ro
+    depends_on:
+      - web
+      - glitchtip-web
+    networks:
+      - priovex
+    mem_limit: 64m
+
+networks:
+  priovex:
+    driver: bridge

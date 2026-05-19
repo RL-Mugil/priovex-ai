@@ -4,6 +4,8 @@ const { withSentryConfig } = require('@sentry/nextjs');
 process.env.NEXT_TELEMETRY_DISABLED = '1';
 
 const nextConfig = {
+  output: 'standalone',
+
   transpilePackages: ['@priovex/types', '@priovex/database', '@priovex/queue'],
 
   serverExternalPackages: ['@prisma/client', 'bullmq', 'ioredis'],
@@ -17,17 +19,15 @@ const nextConfig = {
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'X-XSS-Protection', value: '1; mode=block' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          // Permissive CSP for local development — allows Clerk, Cloudflare Turnstile, Google OAuth
-          // Tighten this for production deployment
           {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://clerk.priovex.ai",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-              "img-src 'self' data: blob: https://img.clerk.com https://*.supabase.co",
+              "img-src 'self' data: blob: https://img.clerk.com https://*.blob.core.windows.net",
               "font-src 'self' data: https://fonts.gstatic.com",
-              "connect-src 'self' https://*.clerk.accounts.dev https://*.supabase.co https://*.sentry.io",
+              "connect-src 'self' https://*.clerk.accounts.dev https://*.blob.core.windows.net https://*.sentry.io",
               "frame-src 'self' https://*.clerk.accounts.dev",
               "worker-src 'self' blob:",
               "upgrade-insecure-requests",

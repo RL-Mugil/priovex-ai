@@ -13,6 +13,13 @@ out/
 .env
 .env.local
 .env.*.local
+.env.prod
+.env.glitchtip
+.env.compose
+
+# Nginx SSL certs (generated on server)
+nginx/certs/
+nginx/certbot/
 
 # Secrets
 *.pem
