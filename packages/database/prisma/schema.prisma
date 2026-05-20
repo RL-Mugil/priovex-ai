@@ -243,6 +243,14 @@ model Report {
   bqBytesProcessed     BigInt     @default(0)
   bqCostUsd            Float      @default(0)
 
+  // Sharing
+  shareToken           String?    @unique
+  shareExpiresAt       DateTime?
+  shareViewCount       Int        @default(0)
+
+  // FTO (Freedom-to-Operate) lite
+  ftoRiskData          Json?      // FTORiskAnalysis
+
   // Disclaimer applied
   disclaimerVersion    String?    @default("v1")
 
@@ -251,6 +259,7 @@ model Report {
 
   @@index([userId])
   @@index([searchId])
+  @@index([shareToken])
   @@map("reports")
 }
 

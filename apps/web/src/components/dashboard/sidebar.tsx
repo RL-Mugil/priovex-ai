@@ -12,6 +12,7 @@ import {
   Plus,
   Zap,
   Users,
+  Code2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { UserButton } from '@clerk/nextjs';
@@ -22,6 +23,7 @@ const navItems = [
   { href: '/dashboard/reports', icon: FileText, label: 'Reports' },
   { href: '/dashboard/team', icon: Users, label: 'Team' },
   { href: '/dashboard/billing', icon: CreditCard, label: 'Billing' },
+  { href: '/dashboard/developer', icon: Code2, label: 'Developer' },
   { href: '/dashboard/settings', icon: Settings, label: 'Settings' },
 ];
 

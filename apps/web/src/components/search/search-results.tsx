@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Download, FileText, ExternalLink, RefreshCw, Trash2, AlertTriangle } from 'lucide-react';
+import { Download, FileText, ExternalLink, RefreshCw, Trash2, AlertTriangle, Share2, Copy, Check } from 'lucide-react';
 import { useState } from 'react';
 import { cn, getVerdictColor } from '@/lib/utils';
 
@@ -36,7 +36,28 @@ export function SearchResults({ search }: { search: Search }) {
   const router = useRouter();
   const [retrying, setRetrying] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const report = search.report;
+
+  async function handleShare() {
+    if (!report) return;
+    if (shareUrl) {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true); setTimeout(() => setCopied(false), 2000); return;
+    }
+    setSharing(true);
+    try {
+      const res = await fetch(`/api/reports/${report.id}/share`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expiryDays: 30 }) });
+      const data = await res.json() as { shareUrl?: string };
+      if (data.shareUrl) {
+        setShareUrl(data.shareUrl);
+        await navigator.clipboard.writeText(data.shareUrl);
+        setCopied(true); setTimeout(() => setCopied(false), 2000);
+      }
+    } finally { setSharing(false); }
+  }
 
   async function handleRetry() {
     setRetrying(true);
@@ -220,6 +241,15 @@ export function SearchResults({ search }: { search: Search }) {
         >
           View Full Report →
         </Link>
+        <button
+          onClick={handleShare}
+          disabled={sharing}
+          className="flex items-center gap-2 border border-slate-200 text-slate-600 px-4 py-3 rounded-xl hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-colors text-sm disabled:opacity-50"
+          title={shareUrl ? 'Copy share link' : 'Share report'}
+        >
+          {copied ? <Check className="w-4 h-4 text-emerald-500" /> : shareUrl ? <Copy className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
+          {sharing ? 'Sharing…' : copied ? 'Copied!' : shareUrl ? 'Copy link' : 'Share'}
+        </button>
         <button
           onClick={handleDelete}
           disabled={deleting}
