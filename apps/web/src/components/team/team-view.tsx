@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Users, Mail, Plus, Crown, Trash2, Clock } from 'lucide-react';
+import Image from 'next/image';
+import { Users, Mail, Plus, Crown, Clock } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/utils';
 
 interface Member {
@@ -195,7 +196,7 @@ export function TeamView({ user, organization, isOwner }: Props) {
             <div key={member.id} className="px-6 py-3 flex items-center justify-between">
               <div className="flex items-center gap-3">
                 {member.avatarUrl ? (
-                  <img src={member.avatarUrl} alt="" className="w-8 h-8 rounded-full" />
+                  <Image src={member.avatarUrl} alt="" width={32} height={32} className="rounded-full" />
                 ) : (
                   <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 text-sm font-medium">
                     {member.name[0]}
