@@ -52,7 +52,7 @@ services:
       - glitchtip-worker
     networks:
       - priovex
-    mem_limit: 256m
+    mem_limit: 512m
 
   glitchtip-worker:
     image: glitchtip/glitchtip
@@ -62,7 +62,7 @@ services:
     env_file: .env.glitchtip
     networks:
       - priovex
-    mem_limit: 256m
+    mem_limit: 384m
 
   nginx:
     image: nginx:1.27-alpine
