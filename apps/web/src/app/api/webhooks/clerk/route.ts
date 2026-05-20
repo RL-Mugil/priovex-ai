@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Webhook } from 'svix';
 import { prisma } from '@priovex/database';
+import { sendWelcome } from '@priovex/email';
 
 interface ClerkUserEvent {
   type: string;
@@ -49,17 +50,19 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'No email found' }, { status: 400 });
       }
 
+      const userName = [data.first_name, data.last_name].filter(Boolean).join(' ') || 'User';
       await prisma.user.upsert({
         where: { clerkId: data.id },
         update: {},
         create: {
           clerkId: data.id,
           email: primaryEmail,
-          name: [data.first_name, data.last_name].filter(Boolean).join(' ') || 'User',
+          name: userName,
           avatarUrl: data.image_url,
           searchQuotaLimit: 1, // Free tier default
         },
       });
+      sendWelcome({ to: primaryEmail, name: userName }).catch(() => {});
     }
 
     if (type === 'user.updated') {
