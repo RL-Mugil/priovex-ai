@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import Link from 'next/link';
 
 interface SharedReport {
   id: string;
@@ -45,7 +46,7 @@ export default async function SharedReportPage({ params }: { params: Promise<{ t
             <span className="text-blue-600 font-bold text-lg">PrioVex.AI</span>
             <span className="text-slate-400 text-sm ml-2">Shared Report</span>
           </div>
-          <a href="/" className="text-sm text-blue-600 hover:underline">Start your own search →</a>
+          <Link href="/" className="text-sm text-blue-600 hover:underline">Start your own search →</Link>
         </div>
       </header>
 
