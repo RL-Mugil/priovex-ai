@@ -2,6 +2,7 @@ import 'dotenv/config';
 import * as Sentry from '@sentry/node';
 import { prisma } from '@priovex/database';
 import { createSearchWorker } from './workers/search.worker';
+import { createQuotaResetWorker, scheduleMonthlyQuotaReset } from './workers/quota-reset.worker';
 
 if (process.env.SENTRY_DSN) {
   Sentry.init({
@@ -22,10 +23,15 @@ async function main() {
   const searchWorker = createSearchWorker();
   console.log(`✅ Search worker started (concurrency: ${process.env.WORKER_CONCURRENCY ?? '3'})`);
 
+  const quotaResetWorker = createQuotaResetWorker();
+  await scheduleMonthlyQuotaReset();
+  console.log('✅ Quota reset worker started (runs 1st of each month)');
+
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     console.log(`\n${signal} received — shutting down workers...`);
     await searchWorker.close();
+    await quotaResetWorker.close();
     await prisma.$disconnect();
     console.log('✅ Workers shut down gracefully');
     process.exit(0);

@@ -65,6 +65,7 @@ import {
 } from '@priovex/report-generator';
 import { AI_RATE_DELAY_MS } from '@priovex/ai-providers';
 import { uploadReport } from '../storage';
+import { sendSearchComplete, sendSearchFailed, sendQuotaWarning } from '@priovex/email';
 
 // =============================================================================
 // STEP DEFINITIONS (14-step pipeline)
@@ -150,6 +151,20 @@ export async function runSearchPipeline(
   let _accBytesProcessed: bigint           = 0n;
   let _accAiModel:        string           = input.aiProvider;
   let _accCurrentPct:     number           = 0;
+
+  // Fetch user email for notifications (non-blocking, best-effort)
+  let _userEmail = '';
+  let _userName = '';
+  let _userUsed = 0;
+  let _userLimit = 0;
+  let _userTier = '';
+  try {
+    const u = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, name: true, searchesUsedThisMonth: true, searchQuotaLimit: true, subscriptionTier: true },
+    });
+    if (u) { _userEmail = u.email; _userName = u.name; _userUsed = u.searchesUsedThisMonth; _userLimit = u.searchQuotaLimit; _userTier = u.subscriptionTier; }
+  } catch { /* ignore */ }
 
   try {
     await log(LogLevel.INFO, 'Enterprise search pipeline v2 started (14 steps)');
@@ -1133,6 +1148,26 @@ export async function runSearchPipeline(
       `${novelElements.length} elements | ${idsEntries.length} IDS entries`
     );
 
+    // Send completion email (non-blocking)
+    if (_userEmail) {
+      sendSearchComplete({
+        to: _userEmail,
+        name: _userName,
+        searchTitle: input.title,
+        searchId,
+        score: savedReport.patentabilityScore ?? 0,
+        verdict: savedReport.overallVerdict ?? 'See report for details',
+      }).catch(() => {});
+
+      // Quota warning at 80%
+      if (_userLimit > 0 && _userUsed >= Math.floor(_userLimit * 0.8)) {
+        sendQuotaWarning({
+          to: _userEmail, name: _userName,
+          used: _userUsed, limit: _userLimit, tier: _userTier,
+        }).catch(() => {});
+      }
+    }
+
     return {
       searchId,
       reportId: savedReport.id,
@@ -1256,6 +1291,15 @@ export async function runSearchPipeline(
         // Otherwise partial report save itself failed — log and fall through to normal handling
         console.error(`[Pipeline:${searchId}] Partial report save failed:`, (partialErr as Error).message);
       }
+    }
+
+    // Send failure email (non-blocking, only for actual failures not cancellations)
+    if (!isCancelled && _userEmail) {
+      sendSearchFailed({
+        to: _userEmail, name: _userName,
+        searchTitle: input.title, searchId,
+        error: error.message.slice(0, 200),
+      }).catch(() => {});
     }
 
     // Normal FAILED / CANCELLED (no data) path

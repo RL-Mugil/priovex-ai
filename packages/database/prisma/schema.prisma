@@ -42,6 +42,7 @@ model User {
   auditLogs              AuditLog[]
   apiKeys                ApiKey[]
   notifications          Notification[]
+  sentInvites            OrganizationInvite[] @relation("SentInvites")
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
 
@@ -57,6 +58,7 @@ model Organization {
   name                  String
   slug                  String    @unique
   logoUrl               String?
+  ownerId               String?
   stripeCustomerId      String?   @unique
   subscriptionId        String?   @unique
   subscriptionTier      PlanTier  @default(PRO)
@@ -67,10 +69,30 @@ model Organization {
   lastQuotaResetAt      DateTime  @default(now())
   members               User[]
   searches              Search[]
+  invites               OrganizationInvite[]
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
   @@map("organizations")
+}
+
+model OrganizationInvite {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  token          String       @unique @default(cuid())
+  invitedById    String
+  invitedBy      User         @relation("SentInvites", fields: [invitedById], references: [id])
+  accepted       Boolean      @default(false)
+  acceptedAt     DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+  @@index([token])
+  @@index([email])
+  @@map("organization_invites")
 }
 
 // =============================================================================
