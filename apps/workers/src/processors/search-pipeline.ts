@@ -31,6 +31,7 @@ const SearchStatus = {
   CLAIMS_RETRIEVAL: 'CLAIMS_RETRIEVAL',
   TIMELINE_ANALYSIS: 'TIMELINE_ANALYSIS',
   AI_SCORING: 'AI_SCORING',
+  FTO_ANALYSIS: 'FTO_ANALYSIS',
   COVERAGE_ANALYSIS: 'COVERAGE_ANALYSIS',
   IDS_GENERATION: 'IDS_GENERATION',
   EXAMINER_SIMULATION: 'EXAMINER_SIMULATION',
@@ -68,7 +69,7 @@ import { uploadReport } from '../storage';
 import { sendSearchComplete, sendSearchFailed, sendQuotaWarning } from '@priovex/email';
 
 // =============================================================================
-// STEP DEFINITIONS (14-step pipeline)
+// STEP DEFINITIONS (15-step pipeline)
 // =============================================================================
 
 const STEP_DEFINITIONS = [
@@ -82,10 +83,11 @@ const STEP_DEFINITIONS = [
   { step: 8,  name: 'Full Claims Retrieval',               status: SearchStatus.CLAIMS_RETRIEVAL,    pct: 58 },
   { step: 9,  name: 'Timeline & Assignee Analysis',        status: SearchStatus.TIMELINE_ANALYSIS,   pct: 63 },
   { step: 10, name: 'AI Relevance Scoring',                status: SearchStatus.AI_SCORING,          pct: 70 },
-  { step: 11, name: 'Feature Coverage Matrix',             status: SearchStatus.COVERAGE_ANALYSIS,   pct: 77 },
-  { step: 12, name: 'IDS Generation',                      status: SearchStatus.IDS_GENERATION,      pct: 82 },
-  { step: 13, name: 'Examiner Simulation',                 status: SearchStatus.EXAMINER_SIMULATION, pct: 87 },
-  { step: 14, name: 'Generating Dual Reports',             status: SearchStatus.GENERATING_REPORT,   pct: 93 },
+  { step: 11, name: 'Freedom-to-Operate Analysis',         status: SearchStatus.FTO_ANALYSIS,        pct: 74 },
+  { step: 12, name: 'Feature Coverage Matrix',             status: SearchStatus.COVERAGE_ANALYSIS,   pct: 78 },
+  { step: 13, name: 'IDS Generation',                      status: SearchStatus.IDS_GENERATION,      pct: 83 },
+  { step: 14, name: 'Examiner Simulation',                 status: SearchStatus.EXAMINER_SIMULATION, pct: 88 },
+  { step: 15, name: 'Generating Dual Reports',             status: SearchStatus.GENERATING_REPORT,   pct: 93 },
 ];
 
 // =============================================================================
@@ -167,7 +169,7 @@ export async function runSearchPipeline(
   } catch { /* ignore */ }
 
   try {
-    await log(LogLevel.INFO, 'Enterprise search pipeline v2 started (14 steps)');
+    await log(LogLevel.INFO, 'Enterprise search pipeline v2 started (15 steps)');
 
     // Check available providers before attempting to create one
     const availableProviders = getAvailableProviders();
@@ -760,10 +762,58 @@ export async function runSearchPipeline(
     await checkCancellation();
 
     // =========================================================================
-    // STEP 11 — Feature Coverage Matrix
+    // STEP 11 — Freedom-to-Operate Analysis
     // =========================================================================
     await updateProgress(11, allPatents.length, analyzedNPL.length);
-    await log(LogLevel.INFO, `Step 11: Building feature coverage matrix (${novelElements.length} elements × references)...`);
+    await log(LogLevel.INFO, 'Step 11: Analyzing freedom-to-operate risk against top prior art...');
+    await prisma.search.update({ where: { id: searchId }, data: { status: SearchStatus.FTO_ANALYSIS as any } });
+
+    const ftoTopPatents = aiOutput.scoredPatents.slice(0, 15);
+    const blockingThreshold = 65;
+    const ftoBlockers = ftoTopPatents.filter(
+      (p) => p.noveltyImpact === 'blocking' || p.noveltyImpact === 'strong' || p.similarityScore >= blockingThreshold
+    );
+
+    const ftoBlockingPatents = ftoBlockers.slice(0, 8).map((p) => ({
+      publicationNumber: p.publicationNumber,
+      title: p.title,
+      riskScore: p.noveltyImpact === 'blocking' ? 90 : p.noveltyImpact === 'strong' ? 75 : Math.min(p.similarityScore, 85),
+      claimOverlapReason: p.similarities[0] ?? `Claims overlap with ${input.keyInnovations[0] ?? 'key inventive elements'}`,
+    }));
+
+    const ftoHighRiskCount = ftoBlockingPatents.filter((p) => p.riskScore >= 80).length;
+    const ftoRiskLevel: 'HIGH' | 'MEDIUM' | 'LOW' =
+      ftoHighRiskCount >= 2 ? 'HIGH' :
+      ftoBlockingPatents.length >= 1 ? 'MEDIUM' : 'LOW';
+
+    const ftoRiskData = {
+      riskLevel: ftoRiskLevel,
+      blockingPatents: ftoBlockingPatents,
+      summary: ftoBlockingPatents.length === 0
+        ? `No directly blocking patents identified. FTO risk appears LOW based on ${ftoTopPatents.length} patents analyzed.`
+        : `${ftoBlockingPatents.length} potentially blocking patent${ftoBlockingPatents.length > 1 ? 's' : ''} identified. ` +
+          `Risk level: ${ftoRiskLevel}. Primary concern: ${ftoBlockingPatents[0]?.claimOverlapReason ?? 'claim overlap with top prior art'}.`,
+      analyzedCount: ftoTopPatents.length,
+    };
+
+    await log(LogLevel.SUCCESS,
+      `FTO analysis: ${ftoRiskLevel} risk | ${ftoBlockingPatents.length} potentially blocking patent${ftoBlockingPatents.length !== 1 ? 's' : ''} out of ${ftoTopPatents.length} analyzed`,
+      {
+        type: 'FTO_ANALYSIS',
+        riskLevel: ftoRiskLevel,
+        blockingCount: ftoBlockingPatents.length,
+        analyzedCount: ftoTopPatents.length,
+        topBlockers: ftoBlockingPatents.slice(0, 3).map((p) => ({ pub: p.publicationNumber, score: p.riskScore })),
+      }
+    );
+
+    await checkCancellation();
+
+    // =========================================================================
+    // STEP 12 — Feature Coverage Matrix
+    // =========================================================================
+    await updateProgress(12, allPatents.length, analyzedNPL.length);
+    await log(LogLevel.INFO, `Step 12: Building feature coverage matrix (${novelElements.length} elements × references)...`);
     await prisma.search.update({ where: { id: searchId }, data: { status: SearchStatus.COVERAGE_ANALYSIS as any } });
 
     let coverageMatrix: CoverageMatrix = {
@@ -854,11 +904,11 @@ export async function runSearchPipeline(
     await checkCancellation();
 
     // =========================================================================
-    // STEP 12 — IDS Generation (template-based — zero AI cost)
+    // STEP 13 — IDS Generation (template-based — zero AI cost)
     // AI call removed: scoring is metadata reformatting, not AI reasoning.
     // =========================================================================
-    await updateProgress(12, allPatents.length, analyzedNPL.length);
-    await log(LogLevel.INFO, 'Step 12: Building IDS table from scored prior art...');
+    await updateProgress(13, allPatents.length, analyzedNPL.length);
+    await log(LogLevel.INFO, 'Step 13: Building IDS table from scored prior art...');
     await prisma.search.update({ where: { id: searchId }, data: { status: SearchStatus.IDS_GENERATION as any } });
 
     const noveltyToRisk: Record<string, number> = {
@@ -906,10 +956,10 @@ export async function runSearchPipeline(
     await checkCancellation();
 
     // =========================================================================
-    // STEP 13 — Examiner Simulation
+    // STEP 14 — Examiner Simulation
     // =========================================================================
-    await updateProgress(13, allPatents.length, analyzedNPL.length);
-    await log(LogLevel.INFO, 'Step 13: Simulating USPTO examiner behavior...');
+    await updateProgress(14, allPatents.length, analyzedNPL.length);
+    await log(LogLevel.INFO, 'Step 14: Simulating USPTO examiner behavior...');
     await prisma.search.update({ where: { id: searchId }, data: { status: SearchStatus.EXAMINER_SIMULATION as any } });
 
     let examinerPrediction: ExaminerPrediction = {
@@ -975,10 +1025,10 @@ export async function runSearchPipeline(
     await checkCancellation();
 
     // =========================================================================
-    // STEP 14 — Generate Dual Reports
+    // STEP 15 — Generate Dual Reports
     // =========================================================================
-    await updateProgress(14, allPatents.length, analyzedNPL.length);
-    await log(LogLevel.INFO, 'Step 14: Generating dual reports (internal + client)...');
+    await updateProgress(15, allPatents.length, analyzedNPL.length);
+    await log(LogLevel.INFO, 'Step 15: Generating dual reports (internal + client)...');
     await prisma.search.update({ where: { id: searchId }, data: { status: SearchStatus.GENERATING_REPORT as any } });
 
     const durationSeconds = Math.round((Date.now() - startTime) / 1000);
@@ -1104,6 +1154,7 @@ export async function runSearchPipeline(
         gapClaimDraftData: gapClaimDraft as any,
         nplReferencesData: analyzedNPL as any,
         nplStatisticsData: nplStats as any,
+        ftoRiskData: ftoRiskData as any,
 
         conceptData: concepts as any,
         keywordData: keywordStrategy as any,
