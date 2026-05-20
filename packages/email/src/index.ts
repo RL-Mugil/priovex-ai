@@ -8,7 +8,7 @@ function getResend(): Resend | null {
   return _resend;
 }
 
-const FROM = process.env.EMAIL_FROM ?? 'mugilvannan@myipstrategy.com';
+const FROM = process.env.EMAIL_FROM ?? 'onboarding@resend.dev';
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://priovex-app.centralindia.cloudapp.azure.com';
 
 async function send(to: string, subject: string, html: string): Promise<void> {
