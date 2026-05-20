@@ -99,6 +99,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Generate Prisma Client
+        run: npm run db:generate
+        env:
+          DATABASE_URL: postgresql://placeholder/priovex
+
       - name: Build all packages
         run: npm run build
         env:
