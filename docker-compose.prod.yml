@@ -46,7 +46,7 @@ services:
     expose:
       - '8000'
     ports:
-      - '8888:8000'
+      - '8889:8000'
     env_file: .env.glitchtip
     depends_on:
       - glitchtip-worker
