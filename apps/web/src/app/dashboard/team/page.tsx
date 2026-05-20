@@ -19,7 +19,7 @@ export default async function TeamPage() {
             orderBy: { createdAt: 'asc' },
           },
           invites: {
-            where: { accepted: false, expiresAt: { gt: new Date() } },
+            where: { accepted: false, revokedAt: null, expiresAt: { gt: new Date() } },
             select: { id: true, email: true, createdAt: true, expiresAt: true },
             orderBy: { createdAt: 'desc' },
           },

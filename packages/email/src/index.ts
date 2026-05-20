@@ -115,7 +115,7 @@ export async function sendTeamInvite(opts: {
       <p><strong>${opts.inviterName}</strong> has invited you to join <strong>${opts.teamName}</strong> on PrioVex.AI.</p>
       <p>Accept the invitation to start collaborating on patent prior art searches.</p>
       <a href="${acceptUrl}" style="display:inline-block;background:#2563eb;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600">Accept Invitation</a>
-      <p style="color:#64748b;font-size:12px;margin-top:24px">This invitation expires in 7 days. PrioVex.AI — Patent Prior Art Intelligence</p>
+      <p style="color:#64748b;font-size:12px;margin-top:24px">This invitation expires in 24 hours. PrioVex.AI — Patent Prior Art Intelligence</p>
     </div>`
   );
 }

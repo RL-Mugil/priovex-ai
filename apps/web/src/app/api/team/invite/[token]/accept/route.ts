@@ -22,6 +22,7 @@ export async function POST(_req: NextRequest, props: Props) {
 
   if (!invite) return NextResponse.json({ error: 'Invalid invite link' }, { status: 404 });
   if (invite.accepted) return NextResponse.json({ error: 'Invite already accepted' }, { status: 400 });
+  if (invite.revokedAt) return NextResponse.json({ error: 'This invite has been revoked' }, { status: 410 });
   if (invite.expiresAt < new Date()) return NextResponse.json({ error: 'Invite has expired' }, { status: 400 });
   if (invite.email !== user.email) {
     return NextResponse.json({ error: 'This invite was sent to a different email address' }, { status: 403 });

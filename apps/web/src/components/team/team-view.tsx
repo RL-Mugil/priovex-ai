@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Image from 'next/image';
-import { Users, Mail, Plus, Crown, Clock } from 'lucide-react';
+import { Users, Mail, Plus, Crown, Clock, X } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/utils';
 
 interface Member {
@@ -43,6 +43,7 @@ export function TeamView({ user, organization, isOwner }: Props) {
   const [teamName, setTeamName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [loading, setLoading] = useState(false);
+  const [revoking, setRevoking] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -60,6 +61,19 @@ export function TeamView({ user, organization, isOwner }: Props) {
       window.location.reload();
     } catch { setError('Failed to create team'); }
     finally { setLoading(false); }
+  }
+
+  async function revokeInvite(inviteId: string, email: string) {
+    if (!confirm(`Revoke the invite sent to ${email}?`)) return;
+    setRevoking(inviteId);
+    try {
+      const res = await fetch(`/api/team/invite/${inviteId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error); return; }
+      setSuccess(`Invite to ${email} revoked`);
+      window.location.reload();
+    } catch { setError('Failed to revoke invite'); }
+    finally { setRevoking(null); }
   }
 
   async function sendInvite() {
@@ -239,9 +253,19 @@ export function TeamView({ user, organization, isOwner }: Props) {
                     <p className="text-xs text-slate-400">Invited {formatRelativeTime(invite.createdAt instanceof Date ? invite.createdAt.toISOString() : invite.createdAt)}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-slate-400">
-                  <Clock className="w-3.5 h-3.5" />
-                  Expires {formatRelativeTime(invite.expiresAt instanceof Date ? invite.expiresAt.toISOString() : invite.expiresAt)}
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                    <Clock className="w-3.5 h-3.5" />
+                    Expires {formatRelativeTime(invite.expiresAt instanceof Date ? invite.expiresAt.toISOString() : invite.expiresAt)}
+                  </div>
+                  <button
+                    onClick={() => revokeInvite(invite.id, invite.email)}
+                    disabled={revoking === invite.id}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors disabled:opacity-50"
+                    title="Revoke invite"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             ))}

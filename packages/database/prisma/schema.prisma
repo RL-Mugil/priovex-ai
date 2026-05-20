@@ -86,6 +86,7 @@ model OrganizationInvite {
   invitedBy      User         @relation("SentInvites", fields: [invitedById], references: [id])
   accepted       Boolean      @default(false)
   acceptedAt     DateTime?
+  revokedAt      DateTime?
   expiresAt      DateTime
   createdAt      DateTime     @default(now())
 

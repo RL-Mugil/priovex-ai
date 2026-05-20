@@ -39,18 +39,19 @@ export async function POST(req: NextRequest) {
   });
   if (existing) return NextResponse.json({ error: 'This user is already a team member' }, { status: 400 });
 
-  // Check for pending invite
+  // Check for pending invite (not revoked, not expired)
   const pendingInvite = await prisma.organizationInvite.findFirst({
     where: {
       organizationId: user.organization.id,
       email,
       accepted: false,
+      revokedAt: null,
       expiresAt: { gt: new Date() },
     },
   });
   if (pendingInvite) return NextResponse.json({ error: 'An invite is already pending for this email' }, { status: 400 });
 
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
   const invite = await prisma.organizationInvite.create({
     data: {
       organizationId: user.organization.id,
