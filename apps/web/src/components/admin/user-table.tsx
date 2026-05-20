@@ -14,12 +14,22 @@ interface AdminUser {
   searchesUsedThisMonth: number;
   searchQuotaLimit: number;
   createdAt: string;
+  organizationId: string | null;
+  organization: { id: string; name: string } | null;
   _count: { searches: number };
+}
+
+interface AdminOrg {
+  id: string;
+  name: string;
+  subscriptionTier: string;
+  _count: { members: number };
 }
 
 interface Props {
   initialUsers: AdminUser[];
   initialTotal: number;
+  orgs: AdminOrg[];
 }
 
 const TIERS = ['FREE', 'PRO', 'AGENCY', 'ENTERPRISE'];
@@ -52,8 +62,9 @@ function RoleBadge({ role }: { role: string }) {
   );
 }
 
-function EditUserModal({ user, onClose, onSaved }: {
+function EditUserModal({ user, orgs, onClose, onSaved }: {
   user: AdminUser;
+  orgs: AdminOrg[];
   onClose: () => void;
   onSaved: (updated: Partial<AdminUser>) => void;
 }) {
@@ -61,6 +72,7 @@ function EditUserModal({ user, onClose, onSaved }: {
   const [tier, setTier] = useState(user.subscriptionTier);
   const [quota, setQuota] = useState(String(user.searchQuotaLimit));
   const [status, setStatus] = useState(user.subscriptionStatus);
+  const [orgId, setOrgId] = useState(user.organizationId ?? '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -76,10 +88,19 @@ function EditUserModal({ user, onClose, onSaved }: {
           subscriptionTier: tier,
           searchQuotaLimit: parseInt(quota, 10),
           subscriptionStatus: status,
+          organizationId: orgId || null,
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? 'Save failed');
-      onSaved({ role, subscriptionTier: tier, searchQuotaLimit: parseInt(quota, 10), subscriptionStatus: status });
+      const selectedOrg = orgs.find((o) => o.id === orgId) ?? null;
+      onSaved({
+        role,
+        subscriptionTier: tier,
+        searchQuotaLimit: parseInt(quota, 10),
+        subscriptionStatus: status,
+        organizationId: orgId || null,
+        organization: selectedOrg ? { id: selectedOrg.id, name: selectedOrg.name } : null,
+      });
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error');
@@ -136,6 +157,27 @@ function EditUserModal({ user, onClose, onSaved }: {
             </select>
           </div>
 
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Team Assignment
+              <span className="text-slate-400 font-normal ml-1">(bypasses invite flow)</span>
+            </label>
+            <select value={orgId} onChange={(e) => setOrgId(e.target.value)}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">— No team —</option>
+              {orgs.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name} ({o.subscriptionTier} · {o._count.members} member{o._count.members !== 1 ? 's' : ''})
+                </option>
+              ))}
+            </select>
+            {user.organization && orgId !== user.organizationId && (
+              <p className="text-xs text-amber-600 mt-1">
+                Currently in <strong>{user.organization.name}</strong> — saving will move them.
+              </p>
+            )}
+          </div>
+
           {error && <p className="text-sm text-red-600">{error}</p>}
         </div>
 
@@ -155,7 +197,7 @@ function EditUserModal({ user, onClose, onSaved }: {
   );
 }
 
-export function UserTable({ initialUsers, initialTotal }: Props) {
+export function UserTable({ initialUsers, initialTotal, orgs }: Props) {
   const [users, setUsers] = useState<AdminUser[]>(initialUsers);
   const [total, setTotal] = useState(initialTotal);
   const [search, setSearch] = useState('');
@@ -215,6 +257,7 @@ export function UserTable({ initialUsers, initialTotal }: Props) {
       {editUser && (
         <EditUserModal
           user={editUser}
+          orgs={orgs}
           onClose={() => setEditUser(null)}
           onSaved={(updated) => { onSaved(editUser.id, updated); setEditUser(null); }}
         />
@@ -258,8 +301,9 @@ export function UserTable({ initialUsers, initialTotal }: Props) {
                 <th className="text-left px-4 py-3 font-medium text-slate-600">User</th>
                 <th className="text-left px-4 py-3 font-medium text-slate-600">Role</th>
                 <th className="text-left px-4 py-3 font-medium text-slate-600">Plan</th>
+                <th className="text-left px-4 py-3 font-medium text-slate-600">Team</th>
                 <th className="text-left px-4 py-3 font-medium text-slate-600">Usage</th>
-                <th className="text-left px-4 py-3 font-medium text-slate-600">Total Searches</th>
+                <th className="text-left px-4 py-3 font-medium text-slate-600">Searches</th>
                 <th className="text-left px-4 py-3 font-medium text-slate-600">Joined</th>
                 <th className="text-right px-4 py-3 font-medium text-slate-600">Actions</th>
               </tr>
@@ -277,6 +321,12 @@ export function UserTable({ initialUsers, initialTotal }: Props) {
                     {user.subscriptionStatus !== 'ACTIVE' && (
                       <span className="ml-1 text-xs text-rose-500">{user.subscriptionStatus}</span>
                     )}
+                  </td>
+                  <td className="px-4 py-3">
+                    {user.organization
+                      ? <span className="text-xs text-slate-700 bg-slate-100 px-2 py-0.5 rounded">{user.organization.name}</span>
+                      : <span className="text-xs text-slate-400">—</span>
+                    }
                   </td>
                   <td className="px-4 py-3">
                     <span className="font-mono text-slate-900">
@@ -322,7 +372,7 @@ export function UserTable({ initialUsers, initialTotal }: Props) {
               ))}
               {users.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-slate-400">No users found</td>
+                  <td colSpan={8} className="px-4 py-12 text-center text-slate-400">No users found</td>
                 </tr>
               )}
             </tbody>

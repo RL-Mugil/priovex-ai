@@ -14,6 +14,7 @@ export async function PATCH(req: NextRequest, props: Props) {
     subscriptionTier?: string;
     searchQuotaLimit?: number;
     subscriptionStatus?: string;
+    organizationId?: string | null;
   };
 
   const data: Record<string, unknown> = {};
@@ -21,6 +22,10 @@ export async function PATCH(req: NextRequest, props: Props) {
   if (body.subscriptionTier !== undefined) data.subscriptionTier = body.subscriptionTier;
   if (body.searchQuotaLimit !== undefined) data.searchQuotaLimit = body.searchQuotaLimit;
   if (body.subscriptionStatus !== undefined) data.subscriptionStatus = body.subscriptionStatus;
+  if ('organizationId' in body) {
+    // '' means "remove from team", a cuid means assign
+    data.organizationId = body.organizationId || null;
+  }
 
   if (Object.keys(data).length === 0) {
     return NextResponse.json({ error: 'Nothing to update' }, { status: 400 });
