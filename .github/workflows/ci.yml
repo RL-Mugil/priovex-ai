@@ -104,5 +104,8 @@ jobs:
         env:
           DATABASE_URL: postgresql://placeholder/priovex
           NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_placeholder
-          NEXT_PUBLIC_APP_URL: https://app.priovex.ai
+          NEXT_PUBLIC_APP_URL: https://priovex-app.centralindia.cloudapp.azure.com
+          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_placeholder
+          SENTRY_SUPPRESS_INSTRUMENTATION_FILE_WARNING: "1"
+          SENTRY_SUPPRESS_GLOBAL_ERROR_HANDLER_FILE_WARNING: "1"
 
