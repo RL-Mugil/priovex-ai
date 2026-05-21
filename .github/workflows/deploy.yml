@@ -77,10 +77,11 @@ jobs:
             set -e
             cd /opt/priovex
 
-            # Write nginx config to a temp file, then docker cp it directly into
-            # the running container — bypasses bind-mount caching entirely.
+            # Write updated nginx config to the bind-mount path on the host.
+            # docker cp can't overwrite bind-mounts, so we write to the host path
+            # then restart the nginx container so it picks up the fresh file on start.
             mkdir -p /opt/priovex/nginx
-            cat > /tmp/nginx-default.conf << 'NGINX_EOF'
+            cat > /opt/priovex/nginx/default.conf << 'NGINX_EOF'
             # ── HTTP: redirect to HTTPS + ACME challenge ──────────────────────────────
             server {
                 listen 80;
@@ -157,10 +158,6 @@ jobs:
             }
             NGINX_EOF
 
-            # Copy the config directly into the nginx container and update host path
-            docker cp /tmp/nginx-default.conf priovex-nginx:/etc/nginx/conf.d/default.conf
-            cp /tmp/nginx-default.conf /opt/priovex/nginx/default.conf
-
             # Authenticate with ACR
             echo "$ACR_PASSWORD" | docker login "$ACR_LOGIN_SERVER" -u "$ACR_USERNAME" --password-stdin
 
@@ -176,11 +173,10 @@ jobs:
               node_modules/.bin/prisma migrate deploy \
               --schema=packages/database/prisma/schema.prisma
 
-            # Restart web + workers with new images (nginx and glitchtip keep running)
-            docker compose -f docker-compose.prod.yml up -d --no-build web workers
-
-            # Reload nginx with the freshly written config
-            docker exec priovex-nginx nginx -t && docker exec priovex-nginx nginx -s reload
+            # Restart web + workers + nginx. nginx restarts from scratch and reads
+            # the freshly written bind-mounted config on startup (safe — fails fast
+            # if config is invalid before dropping the old container).
+            docker compose -f docker-compose.prod.yml up -d --no-build web workers nginx
 
             # Remove dangling images to save disk space on the VM
             docker image prune -f
