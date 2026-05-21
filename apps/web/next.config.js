@@ -27,7 +27,7 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "img-src 'self' data: blob: https://img.clerk.com https://*.blob.core.windows.net",
               "font-src 'self' data: https://fonts.gstatic.com",
-              "connect-src 'self' https://*.clerk.accounts.dev https://*.blob.core.windows.net",
+              "connect-src 'self' https://*.clerk.accounts.dev https://*.blob.core.windows.net https://clerk-telemetry.com",
               "frame-src 'self' https://*.clerk.accounts.dev",
               "worker-src 'self' blob:",
               "upgrade-insecure-requests",
