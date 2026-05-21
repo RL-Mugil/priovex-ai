@@ -60,6 +60,17 @@ jobs:
           cache-from: type=registry,ref=${{ secrets.ACR_LOGIN_SERVER }}/priovex-workers:latest
           cache-to: type=inline
 
+      # ── Upload nginx config (volume-mounted, not inside a Docker image) ─────
+      - name: Upload nginx config
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          source: "nginx/default.conf"
+          target: "/opt/priovex/nginx/"
+          strip_components: 1
+
       # ── SSH into VM and roll out ──────────────────────────────────────────
       - name: Deploy to Azure VM
         uses: appleboy/ssh-action@v1.0.3
@@ -94,6 +105,9 @@ jobs:
 
             # Restart web + workers with new images (nginx and glitchtip keep running)
             docker compose -f docker-compose.prod.yml up -d --no-build web workers
+
+            # Reload nginx to pick up any config changes (test first to avoid downtime)
+            docker exec priovex-nginx nginx -t && docker exec priovex-nginx nginx -s reload
 
             # Remove dangling images to save disk space on the VM
             docker image prune -f

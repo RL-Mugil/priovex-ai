@@ -1,10 +1,9 @@
 import * as Sentry from '@sentry/nextjs';
 
-// DSN targets the GlitchTip container via Docker-internal network.
-// tunnelRoute (/monitoring) means the browser never contacts glitchtip-web
-// directly — Next.js proxies the envelopes server-side.
+// Browser sends directly to the same HTTPS origin — Nginx routes /api/1/ to
+// the glitchtip-web container. Same-origin so CSP connect-src 'self' covers it.
 Sentry.init({
-  dsn: 'http://2d361f38110445e3b6a34aa996292515@glitchtip-web:8000/1',
+  dsn: 'https://2d361f38110445e3b6a34aa996292515@priovex-app.centralindia.cloudapp.azure.com/1',
   environment: process.env.NODE_ENV ?? 'production',
   tracesSampleRate: 0.01,
 });

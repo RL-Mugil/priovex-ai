@@ -44,12 +44,11 @@ const nextConfig = {
 };
 
 module.exports = withSentryConfig(nextConfig, {
-  // Source map upload is disabled — we use self-hosted GlitchTip, not Sentry Cloud.
-  // tunnelRoute proxies client events through /monitoring so the browser never
-  // needs to reach glitchtip-web directly (bypasses CSP and firewall constraints).
+  // Source map upload disabled — self-hosted GlitchTip, not Sentry Cloud.
+  // Client sends directly to /api/1/ on the same origin; Nginx proxies it to
+  // the glitchtip-web container. No tunnel needed.
   silent: true,
   disableLogger: true,
-  tunnelRoute: '/monitoring',
   hideSourceMaps: true,
   sourcemaps: { disable: true },
 });
