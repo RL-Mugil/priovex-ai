@@ -92,7 +92,7 @@ export function ExaminerSimulation({ prediction }: ExaminerSimulationProps) {
       {/* Examiner search */}
       {prediction.examinersLikelySearch && (
         <div>
-          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Examiner's Likely Search</p>
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Examiner&apos;s Likely Search</p>
           <p className="text-sm text-slate-600 leading-relaxed">{prediction.examinersLikelySearch}</p>
         </div>
       )}
