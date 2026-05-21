@@ -60,17 +60,6 @@ jobs:
           cache-from: type=registry,ref=${{ secrets.ACR_LOGIN_SERVER }}/priovex-workers:latest
           cache-to: type=inline
 
-      # ── Upload nginx config (volume-mounted, not inside a Docker image) ─────
-      - name: Upload nginx config
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          source: "nginx/default.conf"
-          target: "/opt/priovex/nginx/"
-          strip_components: 1
-
       # ── SSH into VM and roll out ──────────────────────────────────────────
       - name: Deploy to Azure VM
         uses: appleboy/ssh-action@v1.0.3
@@ -87,6 +76,86 @@ jobs:
           script: |
             set -e
             cd /opt/priovex
+
+            # Write nginx config directly — avoids scp path ambiguity.
+            # The bind mount (./nginx/default.conf) is read by nginx on reload.
+            mkdir -p /opt/priovex/nginx
+            cat > /opt/priovex/nginx/default.conf << 'NGINX_EOF'
+            # ── HTTP: redirect to HTTPS + ACME challenge ──────────────────────────────
+            server {
+                listen 80;
+                server_name priovex-app.centralindia.cloudapp.azure.com priovex.idpd.app errors.priovex.idpd.app;
+                location /.well-known/acme-challenge/ { root /var/www/certbot; }
+                location / { return 301 https://$host$request_uri; }
+            }
+            # ── HTTP fallback on 8080 ─────────────────────────────────────────────────
+            server {
+                listen 8080;
+                server_name _;
+                client_max_body_size 15m;
+                location / {
+                    resolver 127.0.0.11 valid=30s;
+                    set $upstream http://web:3000;
+                    proxy_pass $upstream;
+                    proxy_http_version 1.1;
+                    proxy_set_header Upgrade $http_upgrade;
+                    proxy_set_header Connection 'upgrade';
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto https;
+                    proxy_cache_bypass $http_upgrade;
+                    proxy_read_timeout 3600s;
+                    proxy_send_timeout 3600s;
+                    proxy_buffering off;
+                    proxy_cache off;
+                }
+            }
+            # ── HTTPS: Next.js web app ────────────────────────────────────────────────
+            server {
+                listen 443 ssl;
+                http2 on;
+                server_name priovex-app.centralindia.cloudapp.azure.com priovex.idpd.app;
+                ssl_certificate     /etc/nginx/certs/app/fullchain.pem;
+                ssl_certificate_key /etc/nginx/certs/app/privkey.pem;
+                ssl_protocols       TLSv1.2 TLSv1.3;
+                ssl_ciphers         HIGH:!aNULL:!MD5;
+                ssl_session_cache   shared:SSL:10m;
+                ssl_session_timeout 1d;
+                client_max_body_size 15m;
+                # GlitchTip event ingestion — /api/1/ routes to the glitchtip-web container.
+                # Must be declared before the catch-all location / below.
+                location /api/1/ {
+                    resolver 127.0.0.11 valid=30s;
+                    set $glitchtip http://glitchtip-web:8000;
+                    proxy_pass         $glitchtip;
+                    proxy_http_version 1.1;
+                    proxy_set_header   Host $host;
+                    proxy_set_header   X-Real-IP $remote_addr;
+                    proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_set_header   X-Forwarded-Proto https;
+                    proxy_read_timeout 60s;
+                    client_max_body_size 40m;
+                }
+                location / {
+                    resolver 127.0.0.11 valid=30s;
+                    set $upstream http://web:3000;
+                    proxy_pass         $upstream;
+                    proxy_http_version 1.1;
+                    proxy_set_header   Upgrade $http_upgrade;
+                    proxy_set_header   Connection 'upgrade';
+                    proxy_set_header   Host $host;
+                    proxy_set_header   X-Real-IP $remote_addr;
+                    proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_set_header   X-Forwarded-Proto https;
+                    proxy_cache_bypass $http_upgrade;
+                    proxy_read_timeout  3600s;
+                    proxy_send_timeout  3600s;
+                    proxy_buffering off;
+                    proxy_cache     off;
+                }
+            }
+            NGINX_EOF
 
             # Authenticate with ACR
             echo "$ACR_PASSWORD" | docker login "$ACR_LOGIN_SERVER" -u "$ACR_USERNAME" --password-stdin
@@ -106,7 +175,7 @@ jobs:
             # Restart web + workers with new images (nginx and glitchtip keep running)
             docker compose -f docker-compose.prod.yml up -d --no-build web workers
 
-            # Reload nginx to pick up any config changes (test first to avoid downtime)
+            # Reload nginx with the freshly written config
             docker exec priovex-nginx nginx -t && docker exec priovex-nginx nginx -s reload
 
             # Remove dangling images to save disk space on the VM
