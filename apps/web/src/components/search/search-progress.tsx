@@ -110,7 +110,7 @@ export function SearchProgress({ searchId, initialSearch }: { searchId: string; 
         }
       } catch {}
     };
-    es.onerror = () => es.close();
+    es.onerror = () => { /* let browser auto-reconnect */ };
     return () => es.close();
   }, [searchId, isTerminal, router]);
 
