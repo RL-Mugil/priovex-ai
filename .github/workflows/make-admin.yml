@@ -1,0 +1,31 @@
+name: Make User Admin
+
+on:
+  workflow_dispatch:
+    inputs:
+      email:
+        description: 'User email to promote to ADMIN'
+        required: true
+        type: string
+
+jobs:
+  make-admin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Promote user to ADMIN on VM
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/priovex
+            docker compose -f docker-compose.prod.yml run --rm -T workers node -e "
+              const { PrismaClient } = require('@priovex/database');
+              const p = new PrismaClient();
+              p.user.update({
+                where: { email: '${{ github.event.inputs.email }}' },
+                data: { role: 'ADMIN', subscriptionTier: 'ENTERPRISE', searchQuotaLimit: -1 }
+              }).then(u => console.log('Done:', u.email, u.role)).finally(() => p.\$disconnect());
+            "
