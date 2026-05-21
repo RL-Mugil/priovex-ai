@@ -6,7 +6,7 @@ interface Props {
   params: Promise<{ id: string }>;
 }
 
-// DELETE /api/team/invite/[id] — revoke a pending invite (owner only)
+// DELETE /api/team/invites/[id] — revoke a pending invite (owner only)
 export async function DELETE(_req: NextRequest, props: Props) {
   const { id } = await props.params;
   const { userId: clerkId } = await auth();

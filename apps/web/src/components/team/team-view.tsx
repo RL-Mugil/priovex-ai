@@ -67,7 +67,7 @@ export function TeamView({ user, organization, isOwner }: Props) {
     if (!confirm(`Revoke the invite sent to ${email}?`)) return;
     setRevoking(inviteId);
     try {
-      const res = await fetch(`/api/team/invite/${inviteId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/team/invites/${inviteId}`, { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok) { setError(data.error); return; }
       setSuccess(`Invite to ${email} revoked`);
