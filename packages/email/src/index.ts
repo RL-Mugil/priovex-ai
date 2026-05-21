@@ -11,8 +11,8 @@ function getResend(): Resend | null {
 // EMAIL_FROM must be an address on a domain verified in your Resend account.
 // Resend rejects any FROM address whose domain you don't own/verify.
 // onboarding@resend.dev only works for sends to the Resend account owner's email.
-const FROM = process.env.EMAIL_FROM ?? 'noreply@myipstrategy.com';
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://priovex-app.centralindia.cloudapp.azure.com';
+const FROM = process.env.EMAIL_FROM ?? 'support@idpd.app';
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://priovex.idpd.app';
 
 async function send(to: string, subject: string, html: string): Promise<void> {
   const resend = getResend();
