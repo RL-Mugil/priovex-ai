@@ -27,7 +27,7 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "img-src 'self' data: blob: https://img.clerk.com https://*.blob.core.windows.net",
               "font-src 'self' data: https://fonts.gstatic.com",
-              "connect-src 'self' https://*.clerk.accounts.dev https://*.blob.core.windows.net https://*.sentry.io",
+              "connect-src 'self' https://*.clerk.accounts.dev https://*.blob.core.windows.net",
               "frame-src 'self' https://*.clerk.accounts.dev",
               "worker-src 'self' blob:",
               "upgrade-insecure-requests",
@@ -44,14 +44,12 @@ const nextConfig = {
 };
 
 module.exports = withSentryConfig(nextConfig, {
-  org: process.env.SENTRY_ORG ?? 'metayage-private-limited',
-  project: process.env.SENTRY_PROJECT ?? 'priovex-ai',
+  // Source map upload is disabled — we use self-hosted GlitchTip, not Sentry Cloud.
+  // tunnelRoute proxies client events through /monitoring so the browser never
+  // needs to reach glitchtip-web directly (bypasses CSP and firewall constraints).
   silent: true,
-  widenClientFileUpload: true,
+  disableLogger: true,
   tunnelRoute: '/monitoring',
   hideSourceMaps: true,
-  webpack: {
-    treeshake: { removeDebugLogging: true },
-    automaticVercelMonitors: true,
-  },
+  sourcemaps: { disable: true },
 });
