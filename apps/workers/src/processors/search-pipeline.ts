@@ -16,30 +16,7 @@ import type {
   StructuredClaim,
 } from '@priovex/types';
 import { prisma } from '@priovex/database';
-import { LogLevel, ReportStyle, type Prisma } from '@priovex/database';
-
-// Extended status values — Prisma enum will include these after migration + regeneration
-const SearchStatus = {
-  QUEUED: 'QUEUED',
-  EXTRACTING: 'EXTRACTING',
-  NOVEL_ELEMENTS: 'NOVEL_ELEMENTS',
-  KEYWORD_STRATEGY: 'KEYWORD_STRATEGY',
-  BROAD_SEARCH: 'BROAD_SEARCH',
-  CPC_IDENTIFICATION: 'CPC_IDENTIFICATION',
-  DEEP_CPC_SEARCH: 'DEEP_CPC_SEARCH',
-  NPL_SEARCH: 'NPL_SEARCH',
-  CLAIMS_RETRIEVAL: 'CLAIMS_RETRIEVAL',
-  TIMELINE_ANALYSIS: 'TIMELINE_ANALYSIS',
-  AI_SCORING: 'AI_SCORING',
-  FTO_ANALYSIS: 'FTO_ANALYSIS',
-  COVERAGE_ANALYSIS: 'COVERAGE_ANALYSIS',
-  IDS_GENERATION: 'IDS_GENERATION',
-  EXAMINER_SIMULATION: 'EXAMINER_SIMULATION',
-  GENERATING_REPORT: 'GENERATING_REPORT',
-  COMPLETED: 'COMPLETED',
-  FAILED: 'FAILED',
-  CANCELLED: 'CANCELLED',
-} as const;
+import { LogLevel, ReportStyle, SearchStatus, SearchType, AIProviderType, type Prisma } from '@priovex/database';
 import { createProviderWithFallback, getAvailableProviders } from '@priovex/ai-providers';
 import {
   searchByKeywords,
@@ -113,14 +90,14 @@ export async function runSearchPipeline(
     await prisma.search.update({
       where: { id: searchId },
       data: {
-        status: stepDef.status as any,
+        status: stepDef.status,
         currentStep: step,
         progressPercent: stepDef.pct,
         patentsFound,
-        nplFound,      // will be resolved after prisma generate
+        nplFound,
         startedAt: step === 1 ? new Date() : undefined,
         updatedAt: new Date(),
-      } as any,
+      },
     });
   }
 
@@ -502,7 +479,7 @@ export async function runSearchPipeline(
         total: nplReferences.length,
         topTitles: nplReferences.slice(0, 6).map((n) => ({ title: n.title, source: n.source, score: n.relevanceScore })),
       });
-      await prisma.search.update({ where: { id: searchId }, data: { nplFound: nplReferences.length } as any });
+      await prisma.search.update({ where: { id: searchId }, data: { nplFound: nplReferences.length } });
     } catch (err) {
       await log(LogLevel.WARN, `NPL search failed: ${(err as Error).message}`);
     }
@@ -588,7 +565,7 @@ export async function runSearchPipeline(
     await updateProgress(10, allPatents.length, nplReferences.length);
     _accCurrentPct = 70;
     await log(LogLevel.INFO, `Step 10: AI relevance scoring via ${aiProvider.name}...`);
-    await prisma.search.update({ where: { id: searchId }, data: { status: SearchStatus.AI_SCORING as any } });
+    await prisma.search.update({ where: { id: searchId }, data: { status: SearchStatus.AI_SCORING } });
 
     const calculateInitialScore = (patent: RawPatent): number => {
       let score = 25;
@@ -766,7 +743,7 @@ export async function runSearchPipeline(
     // =========================================================================
     await updateProgress(11, allPatents.length, analyzedNPL.length);
     await log(LogLevel.INFO, 'Step 11: Analyzing freedom-to-operate risk against top prior art...');
-    await prisma.search.update({ where: { id: searchId }, data: { status: SearchStatus.FTO_ANALYSIS as any } });
+    await prisma.search.update({ where: { id: searchId }, data: { status: SearchStatus.FTO_ANALYSIS } });
 
     const ftoTopPatents = aiOutput.scoredPatents.slice(0, 15);
     const blockingThreshold = 65;
@@ -814,7 +791,7 @@ export async function runSearchPipeline(
     // =========================================================================
     await updateProgress(12, allPatents.length, analyzedNPL.length);
     await log(LogLevel.INFO, `Step 12: Building feature coverage matrix (${novelElements.length} elements × references)...`);
-    await prisma.search.update({ where: { id: searchId }, data: { status: SearchStatus.COVERAGE_ANALYSIS as any } });
+    await prisma.search.update({ where: { id: searchId }, data: { status: SearchStatus.COVERAGE_ANALYSIS } });
 
     let coverageMatrix: CoverageMatrix = {
       elements: novelElements,
@@ -909,7 +886,7 @@ export async function runSearchPipeline(
     // =========================================================================
     await updateProgress(13, allPatents.length, analyzedNPL.length);
     await log(LogLevel.INFO, 'Step 13: Building IDS table from scored prior art...');
-    await prisma.search.update({ where: { id: searchId }, data: { status: SearchStatus.IDS_GENERATION as any } });
+    await prisma.search.update({ where: { id: searchId }, data: { status: SearchStatus.IDS_GENERATION } });
 
     const noveltyToRisk: Record<string, number> = {
       blocking: 90, strong: 70, moderate: 45, weak: 20, minimal: 10,
@@ -960,7 +937,7 @@ export async function runSearchPipeline(
     // =========================================================================
     await updateProgress(14, allPatents.length, analyzedNPL.length);
     await log(LogLevel.INFO, 'Step 14: Simulating USPTO examiner behavior...');
-    await prisma.search.update({ where: { id: searchId }, data: { status: SearchStatus.EXAMINER_SIMULATION as any } });
+    await prisma.search.update({ where: { id: searchId }, data: { status: SearchStatus.EXAMINER_SIMULATION } });
 
     let examinerPrediction: ExaminerPrediction = {
       likelyRejectionBasis: ['103'],
@@ -1029,7 +1006,7 @@ export async function runSearchPipeline(
     // =========================================================================
     await updateProgress(15, allPatents.length, analyzedNPL.length);
     await log(LogLevel.INFO, 'Step 15: Generating dual reports (internal + client)...');
-    await prisma.search.update({ where: { id: searchId }, data: { status: SearchStatus.GENERATING_REPORT as any } });
+    await prisma.search.update({ where: { id: searchId }, data: { status: SearchStatus.GENERATING_REPORT } });
 
     const durationSeconds = Math.round((Date.now() - startTime) / 1000);
 
@@ -1135,33 +1112,32 @@ export async function runSearchPipeline(
         userId,
         inventionTitle: input.title,
         reportStyle: input.reportStyle.toUpperCase() as ReportStyle,
-        // searchType added in v2 migration — cast until prisma is regenerated
-        ...({ searchType: (input.searchType ?? 'patentability').toUpperCase().replace('-', '_') } as any),
+        searchType: (input.searchType ?? 'patentability').toUpperCase().replace('-', '_') as SearchType,
 
         patentabilityScore: aiOutput.patentabilityAssessment.patentabilityScore,
         noveltyRating: aiOutput.patentabilityAssessment.noveltyRating,
         obviousnessRating: aiOutput.patentabilityAssessment.obviousnessRating,
         overallVerdict: aiOutput.patentabilityAssessment.overallVerdict,
         executiveSummary: aiOutput.executiveSummary,
-        patentabilityData: aiOutput.patentabilityAssessment as any,
-        claimStrategyData: aiOutput.claimStrategy as any,
+        patentabilityData: aiOutput.patentabilityAssessment as unknown as Prisma.InputJsonValue,
+        claimStrategyData: aiOutput.claimStrategy as unknown as Prisma.InputJsonValue,
 
         // v2 intelligence layers
-        novelElementsData: novelElements as any,
-        coverageMatrixData: coverageMatrix as any,
-        idsEntriesData: idsEntries as any,
-        examinerSimulationData: examinerPrediction as any,
-        gapClaimDraftData: gapClaimDraft as any,
-        nplReferencesData: analyzedNPL as any,
-        nplStatisticsData: nplStats as any,
-        ftoRiskData: ftoRiskData as any,
+        novelElementsData: novelElements as unknown as Prisma.InputJsonValue,
+        coverageMatrixData: coverageMatrix as unknown as Prisma.InputJsonValue,
+        idsEntriesData: idsEntries as unknown as Prisma.InputJsonValue,
+        examinerSimulationData: examinerPrediction as unknown as Prisma.InputJsonValue,
+        gapClaimDraftData: gapClaimDraft as unknown as Prisma.InputJsonValue,
+        nplReferencesData: analyzedNPL as unknown as Prisma.InputJsonValue,
+        nplStatisticsData: nplStats as unknown as Prisma.InputJsonValue,
+        ftoRiskData: ftoRiskData as unknown as Prisma.InputJsonValue,
 
-        conceptData: concepts as any,
-        keywordData: keywordStrategy as any,
-        topPriorArtData: aiOutput.scoredPatents.slice(0, 10) as any,
-        timelineData: timeline as any,
-        assigneeData: assignees as any,
-        statisticsData: reportData.statistics as any,
+        conceptData: concepts as unknown as Prisma.InputJsonValue,
+        keywordData: keywordStrategy as unknown as Prisma.InputJsonValue,
+        topPriorArtData: aiOutput.scoredPatents.slice(0, 10) as unknown as Prisma.InputJsonValue,
+        timelineData: timeline as unknown as Prisma.InputJsonValue,
+        assigneeData: assignees as unknown as Prisma.InputJsonValue,
+        statisticsData: reportData.statistics as unknown as Prisma.InputJsonValue,
         idsReferences: reportData.idsReferences,
 
         markdownContent: reportData.markdownContent,
@@ -1174,7 +1150,7 @@ export async function runSearchPipeline(
         clientReportStorageUrl,
         disclaimerVersion: 'v2',
 
-        aiProvider: input.aiProvider.toUpperCase() as any,
+        aiProvider: input.aiProvider.toUpperCase() as AIProviderType,
         aiModel: aiOutput.model,
         aiTokensUsed: aiOutput.tokensUsed,
         aiCostUsd: aiOutput.costUsd,
@@ -1286,14 +1262,14 @@ export async function runSearchPipeline(
             userId,
             inventionTitle: input.title,
             reportStyle: input.reportStyle.toUpperCase() as ReportStyle,
-            ...({ searchType: (input.searchType ?? 'patentability').toUpperCase().replace('-', '_') } as any),
+            searchType: (input.searchType ?? 'patentability').toUpperCase().replace('-', '_') as SearchType,
             executiveSummary: `Partial report — search cancelled at ${_accCurrentPct}% with ${_accPatents.length} patents and ${_accNPL.length} NPL references collected.`,
             patentabilityScore: null,
             markdownContent: partialMarkdown,
-            topPriorArtData: _accPatents.slice(0, 10) as any,
-            keywordData: { primaryKeywords: _accKeywords } as any,
-            novelElementsData: _accNovelElements as any,
-            nplReferencesData: _accNPL as any,
+            topPriorArtData: _accPatents.slice(0, 10) as unknown as Prisma.InputJsonValue,
+            keywordData: { primaryKeywords: _accKeywords } as unknown as Prisma.InputJsonValue,
+            novelElementsData: _accNovelElements as unknown as Prisma.InputJsonValue,
+            nplReferencesData: _accNPL as unknown as Prisma.InputJsonValue,
             statisticsData: {
               totalPatentsReviewed: _accPatents.length,
               nplReferencesFound: _accNPL.length,
@@ -1304,9 +1280,9 @@ export async function runSearchPipeline(
               aiProvider: input.aiProvider,
               partial: true,
               cancelledAtPercent: _accCurrentPct,
-            } as any,
+            } as unknown as Prisma.InputJsonValue,
             idsReferences: [],
-            aiProvider: input.aiProvider.toUpperCase() as any,
+            aiProvider: input.aiProvider.toUpperCase() as AIProviderType,
             aiModel: _accAiModel,
             aiTokensUsed: 0,
             aiCostUsd: 0,
@@ -1321,10 +1297,10 @@ export async function runSearchPipeline(
           prisma.search.update({
             where: { id: searchId },
             data: {
-              status: SearchStatus.CANCELLED as any,
+              status: SearchStatus.CANCELLED,
               completedAt: new Date(),
               durationSeconds,
-            } as any,
+            },
           }),
           prisma.progressLog.create({
             data: {
@@ -1358,11 +1334,11 @@ export async function runSearchPipeline(
       await prisma.search.update({
         where: { id: searchId },
         data: {
-          status: (isCancelled ? SearchStatus.CANCELLED : SearchStatus.FAILED) as any,
+          status: isCancelled ? SearchStatus.CANCELLED : SearchStatus.FAILED,
           errorMessage: isCancelled ? undefined : error.message.slice(0, 500),
           completedAt: new Date(),
           durationSeconds,
-        } as any,
+        },
       });
     } catch (updateErr) {
       console.error(`[Pipeline:${searchId}] DB status update failed:`, (updateErr as Error).message);

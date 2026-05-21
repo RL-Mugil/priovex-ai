@@ -75,6 +75,7 @@ export function humanizeStatus(status: string): string {
     CLAIMS_RETRIEVAL: 'Full Claims Retrieval',
     TIMELINE_ANALYSIS: 'Timeline & Assignee Analysis',
     AI_SCORING: 'AI Relevance Scoring',
+    FTO_ANALYSIS: 'Freedom-to-Operate Analysis',
     COVERAGE_ANALYSIS: 'Feature Coverage Matrix',
     IDS_GENERATION: 'IDS Generation',
     EXAMINER_SIMULATION: 'Examiner Simulation',

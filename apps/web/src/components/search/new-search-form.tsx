@@ -17,6 +17,7 @@ const schema = z.object({
   depth: z.enum(['quick', 'standard', 'thorough']),
   aiProvider: z.enum(['claude', 'openai', 'gemini']),
   reportStyle: z.enum(['legal', 'technical', 'investor', 'concise', 'comprehensive']),
+  searchType: z.enum(['patentability', 'invalidity', 'fto', 'novelty', 'examiner_style']),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -24,7 +25,7 @@ type FormData = z.infer<typeof schema>;
 const STEP_FIELDS: Record<number, (keyof FormData)[]> = {
   1: ['title', 'technicalField', 'description', 'problemSolved'],
   2: ['keyInnovations'],
-  3: ['depth', 'aiProvider', 'reportStyle', 'jurisdictions'],
+  3: ['depth', 'aiProvider', 'reportStyle', 'jurisdictions', 'searchType'],
 };
 
 interface Props {
@@ -53,6 +54,7 @@ export function NewSearchForm({ remainingSearches }: Props) {
       depth: 'standard',
       aiProvider: 'claude',
       reportStyle: 'comprehensive',
+      searchType: 'patentability',
     },
   });
 
@@ -315,6 +317,14 @@ export function NewSearchForm({ remainingSearches }: Props) {
         {step === 3 && (
           <div className="space-y-5">
             <div className="grid grid-cols-2 gap-4">
+              <SelectField label="Search Type" {...form.register('searchType')}>
+                <option value="patentability">Patentability (35 USC 102/103)</option>
+                <option value="invalidity">Invalidity / Prior Art Challenge</option>
+                <option value="fto">Freedom-to-Operate (FTO)</option>
+                <option value="novelty">Novelty Only (35 USC 102)</option>
+                <option value="examiner_style">Examiner-Style Search</option>
+              </SelectField>
+
               <SelectField label="AI Provider" {...form.register('aiProvider')}>
                 <option value="claude">Claude Sonnet (Anthropic)</option>
                 <option value="openai">GPT-4o (OpenAI)</option>
@@ -367,7 +377,7 @@ export function NewSearchForm({ remainingSearches }: Props) {
               <p><strong className="text-slate-900">Title:</strong> {watch('title')}</p>
               <p><strong className="text-slate-900">Field:</strong> {watch('technicalField')}</p>
               <p><strong className="text-slate-900">Innovations:</strong> {innovations.length} listed</p>
-              <p><strong className="text-slate-900">Config:</strong> {watch('depth')} depth · {watch('aiProvider').toUpperCase()} · {watch('reportStyle')} report · {watch('jurisdictions').join(', ')}</p>
+              <p><strong className="text-slate-900">Config:</strong> {watch('searchType').replace('_', ' ')} · {watch('depth')} depth · {watch('aiProvider').toUpperCase()} · {watch('reportStyle')} report · {watch('jurisdictions').join(', ')}</p>
             </div>
 
             {remainingSearches !== Infinity && (

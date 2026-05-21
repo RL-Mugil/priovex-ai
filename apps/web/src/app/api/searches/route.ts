@@ -15,6 +15,7 @@ const CreateSearchSchema = z.object({
   depth: z.enum(['quick', 'standard', 'thorough']).default('standard'),
   aiProvider: z.enum(['claude', 'openai', 'gemini']).default('claude'),
   reportStyle: z.enum(['legal', 'technical', 'investor', 'concise', 'comprehensive']).default('comprehensive'),
+  searchType: z.enum(['patentability', 'invalidity', 'fto', 'novelty', 'examiner_style']).default('patentability'),
 });
 
 export async function POST(req: NextRequest) {
@@ -51,6 +52,7 @@ export async function POST(req: NextRequest) {
         depth: input.depth.toUpperCase() as any,
         aiProvider: input.aiProvider.toUpperCase() as any,
         reportStyle: input.reportStyle.toUpperCase() as any,
+        searchType: input.searchType.toUpperCase() as any,
         status: 'QUEUED',
       },
     });
@@ -77,6 +79,7 @@ export async function POST(req: NextRequest) {
         depth: input.depth,
         aiProvider: input.aiProvider,
         reportStyle: input.reportStyle,
+        searchType: input.searchType,
       },
       retryCount: 0,
       createdAt: new Date().toISOString(),

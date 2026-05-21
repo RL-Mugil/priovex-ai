@@ -7,7 +7,7 @@ import {
   Loader2, CheckCircle2, XCircle, Clock, AlertTriangle,
   Search, Brain, BarChart3, FileText, Database,
   Layers, Globe, Cpu, ClipboardList, Users, Grid3X3,
-  Tag, BookOpen, Microscope, StopCircle,
+  Tag, BookOpen, Microscope, StopCircle, ShieldAlert,
 } from 'lucide-react';
 import { cn, humanizeStatus, getStatusColor } from '@/lib/utils';
 
@@ -38,11 +38,12 @@ const STEPS = [
   { name: 'Building Keyword Strategy',     icon: Search },
   { name: 'Broad Patent Search',           icon: Database },
   { name: 'CPC Code Identification',       icon: Cpu },
-  { name: 'Deep CPC Search',              icon: Database },
+  { name: 'Deep CPC Search',               icon: Database },
   { name: 'NPL Intelligence Search',       icon: Globe },
   { name: 'Full Claims Retrieval',         icon: FileText },
   { name: 'Timeline & Assignee Analysis',  icon: BarChart3 },
   { name: 'AI Relevance Scoring',          icon: Brain },
+  { name: 'Freedom-to-Operate Analysis',   icon: ShieldAlert },
   { name: 'Feature Coverage Matrix',       icon: Grid3X3 },
   { name: 'IDS Generation',               icon: ClipboardList },
   { name: 'Examiner Simulation',           icon: Users },

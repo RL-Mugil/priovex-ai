@@ -68,11 +68,23 @@ jobs:
           ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
           ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
           IMAGE_TAG: ${{ github.event.workflow_run.head_sha }}
+          # BigQuery
+          GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          BIGQUERY_LOCATION: ${{ vars.BIGQUERY_LOCATION }}
+          BIGQUERY_MAX_BYTES_BILLED: ${{ vars.BIGQUERY_MAX_BYTES_BILLED }}
+          # EPO Open Patent Services
+          EPO_OPS_KEY: ${{ secrets.EPO_OPS_KEY }}
+          EPO_OPS_SECRET: ${{ secrets.EPO_OPS_SECRET }}
+          # Azure Blob Storage
+          AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          AZURE_STORAGE_KEY: ${{ secrets.AZURE_STORAGE_KEY }}
+          AZURE_STORAGE_CONTAINER: ${{ vars.AZURE_STORAGE_CONTAINER }}
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
-          envs: ACR_LOGIN_SERVER,ACR_USERNAME,ACR_PASSWORD,IMAGE_TAG
+          envs: ACR_LOGIN_SERVER,ACR_USERNAME,ACR_PASSWORD,IMAGE_TAG,GOOGLE_CLOUD_PROJECT,GOOGLE_SERVICE_ACCOUNT_JSON,BIGQUERY_LOCATION,BIGQUERY_MAX_BYTES_BILLED,EPO_OPS_KEY,EPO_OPS_SECRET,AZURE_STORAGE_ACCOUNT,AZURE_STORAGE_KEY,AZURE_STORAGE_CONTAINER
           script: |
             set -e
             cd /opt/priovex
@@ -157,6 +169,28 @@ jobs:
                 }
             }
             NGINX_EOF
+
+            # ── Inject / update env vars in .env.prod ────────────────────────────
+            # Uses a helper function: upsert KEY VALUE — updates the line if the
+            # key already exists, otherwise appends it. Safe to run on every deploy.
+            upsert() {
+              local key="$1" val="$2" file="/opt/priovex/.env.prod"
+              if grep -q "^${key}=" "$file" 2>/dev/null; then
+                sed -i "s|^${key}=.*|${key}=${val}|" "$file"
+              else
+                echo "${key}=${val}" >> "$file"
+              fi
+            }
+
+            upsert GOOGLE_CLOUD_PROJECT      "$GOOGLE_CLOUD_PROJECT"
+            upsert GOOGLE_SERVICE_ACCOUNT_JSON "'${GOOGLE_SERVICE_ACCOUNT_JSON}'"
+            upsert BIGQUERY_LOCATION         "${BIGQUERY_LOCATION:-US}"
+            upsert BIGQUERY_MAX_BYTES_BILLED "${BIGQUERY_MAX_BYTES_BILLED:-300000000000}"
+            upsert EPO_OPS_KEY               "$EPO_OPS_KEY"
+            upsert EPO_OPS_SECRET            "$EPO_OPS_SECRET"
+            upsert AZURE_STORAGE_ACCOUNT     "$AZURE_STORAGE_ACCOUNT"
+            upsert AZURE_STORAGE_KEY         "$AZURE_STORAGE_KEY"
+            upsert AZURE_STORAGE_CONTAINER   "${AZURE_STORAGE_CONTAINER:-priovex-reports}"
 
             # Authenticate with ACR
             echo "$ACR_PASSWORD" | docker login "$ACR_LOGIN_SERVER" -u "$ACR_USERNAME" --password-stdin
