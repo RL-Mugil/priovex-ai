@@ -8,13 +8,10 @@ function getResend(): Resend | null {
   return _resend;
 }
 
-// Only use a custom FROM if it's a resend.dev address or explicitly verified.
-// Resend rejects sends from unverified domains silently — fall back to the
-// built-in verified sender so email always works without DNS setup.
-const configuredFrom = process.env.EMAIL_FROM ?? '';
-const FROM = configuredFrom.endsWith('@resend.dev') || configuredFrom.endsWith('@resend.com')
-  ? configuredFrom
-  : 'onboarding@resend.dev';
+// EMAIL_FROM must be an address on a domain verified in your Resend account.
+// Resend rejects any FROM address whose domain you don't own/verify.
+// onboarding@resend.dev only works for sends to the Resend account owner's email.
+const FROM = process.env.EMAIL_FROM ?? 'noreply@myipstrategy.com';
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'https://priovex-app.centralindia.cloudapp.azure.com';
 
 async function send(to: string, subject: string, html: string): Promise<void> {
