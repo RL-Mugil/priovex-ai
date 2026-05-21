@@ -21,11 +21,15 @@ jobs:
           script: |
             set -e
             cd /opt/priovex
-            docker compose -f docker-compose.prod.yml run --rm -T workers node -e "
-              const { PrismaClient } = require('@priovex/database');
-              const p = new PrismaClient();
-              p.user.update({
-                where: { email: '${{ github.event.inputs.email }}' },
-                data: { role: 'ADMIN', subscriptionTier: 'ENTERPRISE', searchQuotaLimit: -1 }
-              }).then(u => console.log('Done:', u.email, u.role)).finally(() => p.\$disconnect());
+            # Load DATABASE_DIRECT_URL from .env.prod
+            export $(grep '^DATABASE_DIRECT_URL=' .env.prod | xargs)
+            # Install psql if not present
+            which psql || (apt-get update -qq && apt-get install -y -qq postgresql-client)
+            psql "$DATABASE_DIRECT_URL" -c "
+              UPDATE users
+              SET role = 'ADMIN',
+                  \"subscriptionTier\" = 'ENTERPRISE',
+                  \"searchQuotaLimit\" = -1
+              WHERE email = '${{ github.event.inputs.email }}';
+              SELECT email, role, \"subscriptionTier\", \"searchQuotaLimit\" FROM users WHERE email = '${{ github.event.inputs.email }}';
             "
